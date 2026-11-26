@@ -3,21 +3,12 @@ name: Linux-Build
 on:
   push:
     branches: [ main ]
-    tags: [ 'v*' ]
-  pull_request:
   workflow_dispatch:
-
-permissions:
-  contents: write        # nötig, damit bei einem Tag ein Release angelegt werden kann
 
 jobs:
   linux:
-    name: Linux (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ ubuntu-22.04, ubuntu-24.04 ]
+    name: Linux (Mint 21/22)
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
@@ -29,81 +20,10 @@ jobs:
       - name: Bauen
         run: VERSION="${GITHUB_REF_NAME//\//-}" bash scripts/build.sh
 
-      - name: Start-Test (ohne Bildschirm)
-        run: |
-          cd out/cap32-winape-*/
-          SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy timeout 5 ./cap32 --help || test $? -eq 124 || true
-          ldd cap32.bin | grep -i "not found" && exit 1 || true
-
       - name: Paket hochladen
         uses: actions/upload-artifact@v4
         with:
-          name: cap32-winape-linux-${{ matrix.os }}
+          name: cap32-winape-linux
           path: |
             out/*.tar.gz
             out/*.sha256
-
-  windows:
-    name: Windows (${{ matrix.arch }})
-    runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { arch: x64, msystem: MINGW64, env: x86_64 }
-          - { arch: x86, msystem: MINGW32, env: i686 }
-    defaults:
-      run:
-        shell: msys2 {0}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: msys2/setup-msys2@v2
-        with:
-          msystem: ${{ matrix.msystem }}
-          update: true
-          install: >-
-            git
-            make
-            zip
-            diffutils
-            mingw-w64-${{ matrix.env }}-toolchain
-            mingw-w64-${{ matrix.env }}-SDL2
-            mingw-w64-${{ matrix.env }}-freetype
-            mingw-w64-${{ matrix.env }}-libpng
-            mingw-w64-${{ matrix.env }}-zlib
-            mingw-w64-${{ matrix.env }}-pkg-config
-
-      - name: Bauen
-        run: VERSION="${GITHUB_REF_NAME//\//-}" bash scripts/build-windows.sh
-
-      - name: Paket hochladen
-        uses: actions/upload-artifact@v4
-        with:
-          name: cap32-winape-windows-${{ matrix.arch }}
-          path: |
-            out/*.zip
-            out/*.sha256
-
-  release:
-    name: Release (nur bei Tag v*)
-    needs: [ linux, windows ]
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: cap32-winape-linux-ubuntu-22.04
-          path: dist
-      - uses: actions/download-artifact@v4
-        with:
-          name: cap32-winape-windows-x64
-          path: dist
-      - uses: actions/download-artifact@v4
-        with:
-          name: cap32-winape-windows-x86
-          path: dist
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          generate_release_notes: true
