@@ -39,6 +39,11 @@ make -C "$WORK" -j"$(nproc)" ARCH="$ARCH" CXX=g++ WINE="" CFLAGS="-I$INC" distri
 
 echo "==> Paket $NAME"
 PKG="$WORK/release/cap32-$ARCH"
+# Alle DLLs, die cap32.exe (auch indirekt) braucht, dazulegen - unabhängig davon, wie MSYS2 sie gerade nennt (z. B. libz-1.dll)
+ldd "$PKG/cap32.exe" | awk '/=> \/(mingw|ucrt|clang)[0-9]*\/bin\//{print $3}' | while read -r dll; do
+  cp -n "$dll" "$PKG/"
+done
+echo "DLLs im Paket:"; ls "$PKG"/*.dll
 mkdir -p "$PKG/doc" && cp "$HERE"/doc/*.md "$PKG/doc/"
 cat > "$PKG/START-HIER.txt" <<'TXT'
 cap32.exe starten (Doppelklick). Menue: F1, Einstellungen: Menue > Options.
