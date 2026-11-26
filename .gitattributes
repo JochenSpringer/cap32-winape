@@ -1,0 +1,4 @@
+# Patches und Skripte müssen unter Windows mit LF-Zeilenenden ausgecheckt werden
+*.patch -text
+*.sh text eol=lf
+UPSTREAM_COMMIT text eol=lf
