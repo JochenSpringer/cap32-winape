@@ -2989,14 +2989,29 @@ index 0000000..86249b3
 +/* Kern */
 +void m4_port_write(u32 porthi, u32 data);
 +#endif
-diff --git a/src/m4/m4plat_posix.c b/src/m4/m4plat_posix.c
+diff --git a/src/m4/m4plat_host.c b/src/m4/m4plat_host.c
 new file mode 100644
-index 0000000..0c1a10b
+index 0000000..781974f
 --- /dev/null
-+++ b/src/m4/m4plat_posix.c
-@@ -0,0 +1,67 @@
-+/* M4 board emulation - platform layer for Caprice32 (POSIX) */
-+/* Testschicht (Linux): bildet die Plattformfunktionen mit POSIX nach */
++++ b/src/m4/m4plat_host.c
+@@ -0,0 +1,123 @@
++/* M4 board emulation - host platform layer for Caprice32 (Linux/macOS: POSIX, Windows: Win32 + Winsock) */
++#ifdef _WIN32
++#include <winsock2.h>
++#include <ws2tcpip.h>
++#include <windows.h>
++#include <io.h>
++#include <direct.h>
++#include <fcntl.h>
++#include <dirent.h>
++#include <sys/stat.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <time.h>
++#include <errno.h>
++#include "m4plat.h"
++#else
 +#define _GNU_SOURCE
 +#include "m4plat.h"
 +#include <stdio.h>
@@ -3007,7 +3022,6 @@ index 0000000..0c1a10b
 +#include <fcntl.h>
 +#include <dirent.h>
 +#include <sys/stat.h>
-+#include <sys/statvfs.h>
 +#include <sys/socket.h>
 +#include <sys/select.h>
 +#include <netinet/in.h>
@@ -3016,16 +3030,46 @@ index 0000000..0c1a10b
 +#include <pthread.h>
 +#include <time.h>
 +#include <sched.h>
-+#include <sys/stat.h>
++#endif
++
++#ifndef O_BINARY
++#define O_BINARY 0
++#endif
++#ifdef _WIN32
++#define MKDIR(p) _mkdir(p)
++#define SOCK_ERR() WSAGetLastError()
++#define E_INPROGRESS WSAEWOULDBLOCK
++#define E_AGAIN WSAEWOULDBLOCK
++#define CLOSESOCK(s) closesocket(s)
++#define SENDFLAGS 0
++typedef char sockopt_t;
++static void net_up(void){ static int up; if(!up){ WSADATA w; WSAStartup(MAKEWORD(2,2),&w); up=1; } }
++static void set_nonblock(int s){ u_long on=1; ioctlsocket((SOCKET)s,FIONBIO,&on); }
++#else
++#define MKDIR(p) mkdir(p,0755)
++#define SOCK_ERR() errno
++#define E_INPROGRESS EINPROGRESS
++#define E_AGAIN EAGAIN
++#define CLOSESOCK(s) close(s)
++#ifdef MSG_NOSIGNAL
++#define SENDFLAGS MSG_NOSIGNAL
++#else
++#define SENDFLAGS 0
++#endif
++typedef int sockopt_t;
++static void net_up(void){}
++static void set_nonblock(int s){ fcntl(s,F_SETFL,O_NONBLOCK); }
++#endif
++
 +char P_root[512]="m4sd"; static u8 *P_rom; static int P_logon;
 +void m4_set_rom(u8 *rom){ P_rom=rom; }
-+void m4_set_root(const char *root){ snprintf(P_root,sizeof P_root,"%s",root); size_t n=strlen(P_root); while(n>1&&P_root[n-1]=='/') P_root[--n]=0; mkdir(P_root,0755); }
++void m4_set_root(const char *root){ snprintf(P_root,sizeof P_root,"%s",root); size_t n=strlen(P_root); while(n>1&&(P_root[n-1]=='/'||P_root[n-1]=='\\')) P_root[--n]=0; MKDIR(P_root); }
 +void m4_set_log(int on){ P_logon=on; }
 +static void full(const char*p,char*o){ snprintf(o,1024,"%s/%s",P_root,p); }
 +void *P_open(const char*path,int fa){ char f[1024]; full(path,f); int fl=0;
 +  if((fa&3)==3||(fa&2)) fl=(fa&1)?O_RDWR:O_WRONLY; else fl=O_RDONLY;
 +  if(fa&FA_CREATE_NEW) fl|=O_CREAT|O_EXCL; if(fa&FA_CREATE_ALWAYS) fl|=O_CREAT|O_TRUNC; if(fa&FA_OPEN_ALWAYS) fl|=O_CREAT;
-+  int fd=open(f,fl,0644); if(fd<0) return NULL; return (void*)(long)(fd+1); }
++  int fd=open(f,fl|O_BINARY,0644); if(fd<0) return NULL; return (void*)(long)(fd+1); }
 +#define FD(h) ((int)(long)(h)-1)
 +int P_read(void*h,u8*b,int n){ return read(FD(h),b,n); }
 +int P_write(void*h,const u8*b,int n){ return write(FD(h),b,n); }
@@ -3034,8 +3078,14 @@ index 0000000..0c1a10b
 +u32 P_size(void*h){ struct stat s; fstat(FD(h),&s); return s.st_size; }
 +void P_close(void*h){ close(FD(h)); }
 +int P_delete(const char*p){ char f[1024]; full(p,f); return unlink(f); }
-+int P_rename(const char*t,const char*f){ char a[1024],b[1024]; full(t,a); full(f,b); return rename(b,a); }
-+int P_mkdir(const char*p){ char f[1024]; full(p,f); return mkdir(f,0755); }
++int P_rename(const char*t,const char*f){ char a[1024],b[1024]; full(t,a); full(f,b);
++#ifdef _WIN32
++  return MoveFileExA(b,a,MOVEFILE_REPLACE_EXISTING)?0:-1;
++#else
++  return rename(b,a);
++#endif
++}
++int P_mkdir(const char*p){ char f[1024]; full(p,f); return MKDIR(f); }
 +int P_rmdir(const char*p){ char f[1024]; full(p,f); return rmdir(f); }
 +int P_copy(const char*s,const char*d){ void*a=P_open(s,FA_READ); if(!a) return -1; void*b=P_open(d,FA_WRITE|FA_CREATE_ALWAYS); if(!b){P_close(a);return -1;} u8 buf[4096]; int n; while((n=P_read(a,buf,4096))>0) P_write(b,buf,n); P_close(a); P_close(b); return 0; }
 +static void fill(const char*dir,const char*name,P_ent*e){ char f[1024],g[1024]; snprintf(g,1024,"%s/%s",dir,name); full(g,f); struct stat s; memset(e,0,sizeof*e); snprintf(e->name,260,"%s",name); if(stat(f,&s)==0){ e->size=s.st_size; e->attr=S_ISDIR(s.st_mode)?0x10:0x20; } }
@@ -3046,19 +3096,25 @@ index 0000000..0c1a10b
 +int P_stat(const char*p,P_ent*e){ char f[1024]; full(p,f); struct stat s; if(stat(f,&s)) return -1; memset(e,0,sizeof*e); const char*b=strrchr(p,'/'); snprintf(e->name,260,"%s",b?b+1:p); e->size=s.st_size; e->attr=S_ISDIR(s.st_mode)?0x10:0x20; return 0; }
 +u32 P_freekb(void){ return 123456; }
 +void P_time(P_tm*t){ time_t n=time(0); struct tm*l=localtime(&n); t->year=l->tm_year+1900; t->mon=l->tm_mon+1; t->day=l->tm_mday; t->hour=l->tm_hour; t->min=l->tm_min; t->sec=l->tm_sec; }
-+int P_sock_new(void){ int s=socket(AF_INET,SOCK_STREAM,0); if(s>=0) fcntl(s,F_SETFL,O_NONBLOCK); return s; }
-+int P_sock_connect(int s,const u8 ip[4],u16 port){ struct sockaddr_in a; memset(&a,0,sizeof a); a.sin_family=AF_INET; memcpy(&a.sin_addr,ip,4); a.sin_port=htons(port); int r=connect(s,(void*)&a,sizeof a); if(r<0&&errno!=EINPROGRESS) return -1; return 0; }
-+int P_sock_cstate(int s){ fd_set w; FD_ZERO(&w); FD_SET(s,&w); struct timeval tv={0,0}; if(select(s+1,0,&w,0,&tv)<=0) return 0; int e=0; socklen_t l=sizeof e; getsockopt(s,SOL_SOCKET,SO_ERROR,&e,&l); return e?-1:1; }
-+int P_sock_send(int s,const u8*b,int n){ int r=send(s,b,n,MSG_NOSIGNAL); if(r<0) return (errno==EAGAIN)?0:-1; return r; }
-+int P_sock_recv(int s,u8*b,int n){ int r=recv(s,b,n,0); if(r>0) return r; if(r==0) return -1; return (errno==EAGAIN)?0:-1; }
-+void P_sock_close(int s){ close(s); }
-+int P_sock_listen(int s,const u8 ip[4],u16 port){ struct sockaddr_in a; memset(&a,0,sizeof a); a.sin_family=AF_INET; memcpy(&a.sin_addr,ip,4); a.sin_port=htons(port); int o=1; setsockopt(s,SOL_SOCKET,SO_REUSEADDR,&o,sizeof o); if(bind(s,(void*)&a,sizeof a)) return -1; return listen(s,2); }
-+int P_sock_accept(int s,u8 ip[4],u16*port){ struct sockaddr_in a; socklen_t l=sizeof a; int n=accept(s,(void*)&a,&l); if(n<0) return -1; fcntl(n,F_SETFL,O_NONBLOCK); memcpy(ip,&a.sin_addr,4); *port=ntohs(a.sin_port); return n; }
-+int P_resolve(const char*h,u8 ip[4]){ struct addrinfo hi,*r; memset(&hi,0,sizeof hi); hi.ai_family=AF_INET; if(getaddrinfo(h,0,&hi,&r)) return -1; memcpy(ip,&((struct sockaddr_in*)r->ai_addr)->sin_addr,4); freeaddrinfo(r); return 0; }
++int P_sock_new(void){ net_up(); int s=(int)socket(AF_INET,SOCK_STREAM,0); if(s>=0) set_nonblock(s); return s; }
++int P_sock_connect(int s,const u8 ip[4],u16 port){ struct sockaddr_in a; memset(&a,0,sizeof a); a.sin_family=AF_INET; memcpy(&a.sin_addr,ip,4); a.sin_port=htons(port); int r=connect(s,(void*)&a,sizeof a); if(r<0&&SOCK_ERR()!=E_INPROGRESS) return -1; return 0; }
++int P_sock_cstate(int s){ fd_set w,x; FD_ZERO(&w); FD_ZERO(&x); FD_SET(s,&w); FD_SET(s,&x); struct timeval tv={0,0}; if(select(s+1,0,&w,&x,&tv)<=0) return 0; if(FD_ISSET(s,&x)) return -1; int e=0; socklen_t l=sizeof e; getsockopt(s,SOL_SOCKET,SO_ERROR,(sockopt_t*)&e,&l); return e?-1:1; }
++int P_sock_send(int s,const u8*b,int n){ int r=(int)send(s,(const char*)b,n,SENDFLAGS); if(r<0) return (SOCK_ERR()==E_AGAIN)?0:-1; return r; }
++int P_sock_recv(int s,u8*b,int n){ int r=(int)recv(s,(char*)b,n,0); if(r>0) return r; if(r==0) return -1; return (SOCK_ERR()==E_AGAIN)?0:-1; }
++void P_sock_close(int s){ CLOSESOCK(s); }
++int P_sock_listen(int s,const u8 ip[4],u16 port){ struct sockaddr_in a; memset(&a,0,sizeof a); a.sin_family=AF_INET; memcpy(&a.sin_addr,ip,4); a.sin_port=htons(port); int o=1; setsockopt(s,SOL_SOCKET,SO_REUSEADDR,(const sockopt_t*)&o,sizeof o); if(bind(s,(void*)&a,sizeof a)) return -1; return listen(s,2); }
++int P_sock_accept(int s,u8 ip[4],u16*port){ struct sockaddr_in a; socklen_t l=sizeof a; int n=(int)accept(s,(void*)&a,&l); if(n<0) return -1; set_nonblock(n); memcpy(ip,&a.sin_addr,4); *port=ntohs(a.sin_port); return n; }
++int P_resolve(const char*h,u8 ip[4]){ net_up(); struct addrinfo hi,*r; memset(&hi,0,sizeof hi); hi.ai_family=AF_INET; if(getaddrinfo(h,0,&hi,&r)) return -1; memcpy(ip,&((struct sockaddr_in*)r->ai_addr)->sin_addr,4); freeaddrinfo(r); return 0; }
 +u8 *P_rom_base(void){ return P_rom; }
++#ifdef _WIN32
++static DWORD WINAPI thr(LPVOID f){ ((void(*)(void))f)(); return 0; }
++void P_start_worker(void(*fn)(void)){ HANDLE h=CreateThread(NULL,0,thr,(LPVOID)fn,0,NULL); if(h) CloseHandle(h); }
++void P_sleep(int ms){ Sleep(ms<0?0:ms); }
++#else
 +static void*thr(void*f){ ((void(*)(void))f)(); return 0; }
 +void P_start_worker(void(*fn)(void)){ pthread_t t; pthread_create(&t,0,thr,(void*)fn); pthread_detach(t); }
 +void P_sleep(int ms){ if(ms<=0){ sched_yield(); return; } usleep(ms*1000); }
++#endif
 +void P_log(const char*s){ if(P_logon) fputs(s,stderr); }
 +
 +void P_init(void){}
