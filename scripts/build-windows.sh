@@ -11,6 +11,7 @@ REPO="${CAP32_REPO:-https://github.com/ColinPitrat/caprice32.git}"
 COMMIT="$(tr -d '[:space:]' < "$HERE/UPSTREAM_COMMIT")"
 WORK="$HERE/build"
 OUT="$HERE/out"
+VERSION="${VERSION:-$(grep -ho '^+#define VERSION_STRING "[^"]*"' "$HERE"/patches/*.patch | sed 's/.*"\(.*\)"/\1/' | head -n1 || true)}"
 VERSION="${VERSION:-$(date +%Y%m%d)}"
 
 case "${MSYSTEM:-}" in
