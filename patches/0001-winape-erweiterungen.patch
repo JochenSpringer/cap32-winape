@@ -373,10 +373,10 @@ index 8c6e516..545f387 100644
  
  
 diff --git a/src/cap32.cpp b/src/cap32.cpp
-index bd57d45..301f30a 100644
+index bd57d45..a893821 100644
 --- a/src/cap32.cpp
 +++ b/src/cap32.cpp
-@@ -27,8 +27,13 @@
+@@ -27,8 +27,14 @@
  #include "SDL.h"
  
  #include "cap32.h"
@@ -387,10 +387,11 @@ index bd57d45..301f30a 100644
 +#include "charmode.h"
 +#include "m4.h"
 +#include "printer_sound.h"
++#include "drive_sound.h"
  #include "disk.h"
  #include "tape.h"
  #include "video.h"
-@@ -38,6 +43,7 @@
+@@ -38,6 +44,7 @@
  #include "stringutils.h"
  #include "zip.h"
  #include "keyboard.h"
@@ -398,7 +399,7 @@ index bd57d45..301f30a 100644
  #include "cartridge.h"
  #include "asic.h"
  #include "argparse.h"
-@@ -792,9 +798,15 @@ void z80_OUT_handler (reg_pair port, byte val)
+@@ -792,9 +799,16 @@ void z80_OUT_handler (reg_pair port, byte val)
  // printer port ---------------------------------------------------------------
     if (!(port.b.h & 0x10)) { // printer port?
        CPC.printer_port = val ^ 0x80; // invert bit 7
@@ -406,8 +407,9 @@ index bd57d45..301f30a 100644
 +      // 8-bit hardware mod (Happy Computer 7/1986): the 8th data bit comes from PPI port C bit 5 (tape write line)
 +      const bool bit8 = CPC.printer_8bit && (PPI.portC & 0x20);
 +      if (pdfprinter_active()) {
-+         pdfprinter_port_write(val, bit8); // PDF printer: data byte on the rising edge of the strobe bit
-+         printer_sound_note_char();
++         if (pdfprinter_port_write(val, bit8)) { // PDF printer: data byte on the rising edge of the strobe bit
++            printer_sound_note_char();
++         }
 +      } else if (pfoPrinter) {
           if (!(CPC.printer_port & 0x80)) { // only grab data bytes; ignore the strobe signal
 -            fputc(CPC.printer_port, pfoPrinter); // capture printer output to file
@@ -416,7 +418,7 @@ index bd57d45..301f30a 100644
              fflush(pfoPrinter);
           }
        }
-@@ -875,6 +887,10 @@ void z80_OUT_handler (reg_pair port, byte val)
+@@ -875,6 +889,10 @@ void z80_OUT_handler (reg_pair port, byte val)
     else if ((port.b.h == 0xfb) && (!(port.b.l & 0x80))) { // FDC data register?
        fdc_write_data(val);
     }
@@ -427,7 +429,7 @@ index bd57d45..301f30a 100644
  // MF2 ------------------------------------------------------------------------
     else if ((CPC.mf2) && (port.b.h == 0xfe)) { // Multiface 2?
        if ((port.b.l == 0xe8) && (!(dwMF2Flags & MF2_INVISIBLE))) { // page in MF2 ROM?
-@@ -1088,6 +1104,7 @@ int emulator_patch_ROM ()
+@@ -1088,6 +1106,7 @@ int emulator_patch_ROM ()
  
  void emulator_reset ()
  {
@@ -435,7 +437,7 @@ index bd57d45..301f30a 100644
     if (CPC.model > 2) {
        if (pbCartridgePages[0] != nullptr) {
           pbROMlo = pbCartridgePages[0];
-@@ -1211,7 +1228,7 @@ int emulator_init ()
+@@ -1211,7 +1230,7 @@ int emulator_init ()
           }
           pchRomData = new byte [16384]; // allocate 16K
           memset(pchRomData, 0, 16384); // clear memory
@@ -444,7 +446,7 @@ index bd57d45..301f30a 100644
           if ((pfileObject = fopen(romFilename.c_str(), "rb")) != nullptr) { // attempt to open the ROM image
              if(fread(pchRomData, 128, 1, pfileObject) != 1) { // read 128 bytes of ROM data
                fclose(pfileObject);
-@@ -1281,12 +1298,40 @@ int emulator_init ()
+@@ -1281,12 +1300,41 @@ int emulator_init ()
           }
        }
     }
@@ -473,6 +475,7 @@ index bd57d45..301f30a 100644
 +         memmap_ROM[6] = data;
 +         m4_set_root(CPC.m4_root.c_str());
 +         m4_set_log(static_cast<int>(CPC.m4_log));
++         m4_patch_drive_switch(data); // |A and |B always switch to the floppy drives
 +         m4_set_rom(data);
 +      }
 +   }
@@ -486,7 +489,7 @@ index bd57d45..301f30a 100644
           bool MF2error = false;
           if ((pfileObject = fopen(romFilename.c_str(), "rb")) != nullptr) { // attempt to open the ROM image
              if((fread(pbMF2ROMbackup, 8192, 1, pfileObject) != 1) || (memcmp(pbMF2ROMbackup+0x0d32, "MULTIFACE 2", 11) != 0)) { // does it have the required signature?
-@@ -1398,6 +1443,14 @@ void bin_load (const std::string& filename, const size_t offset)
+@@ -1398,6 +1446,14 @@ void bin_load (const std::string& filename, const size_t offset)
  
  int printer_start ()
  {
@@ -501,7 +504,7 @@ index bd57d45..301f30a 100644
     if (!pfoPrinter) {
        if(!(pfoPrinter = fopen(CPC.printer_file.c_str(), "wb"))) {
           return 0; // failed to open/create file
-@@ -1410,6 +1463,7 @@ int printer_start ()
+@@ -1410,6 +1466,7 @@ int printer_start ()
  
  void printer_stop ()
  {
@@ -509,7 +512,7 @@ index bd57d45..301f30a 100644
     if (pfoPrinter) {
        fclose(pfoPrinter);
     }
-@@ -1565,9 +1619,15 @@ int video_set_palette ()
+@@ -1565,9 +1622,15 @@ int video_set_palette ()
               blue = 255;
           }
  
@@ -528,7 +531,7 @@ index bd57d45..301f30a 100644
        }
     }
  
-@@ -1864,8 +1924,18 @@ void loadConfiguration (t_CPC &CPC, const std::string& configFilename)
+@@ -1864,8 +1927,20 @@ void loadConfiguration (t_CPC &CPC, const std::string& configFilename)
     CPC.auto_pause = conf.getIntValue("system", "auto_pause", 1) & 1;
     CPC.boot_time = conf.getIntValue("system", "boot_time", 5);
     CPC.printer = conf.getIntValue("system", "printer", 0) & 1;
@@ -541,13 +544,15 @@ index bd57d45..301f30a 100644
 +   CPC.m4_root = conf.getStringValue("m4", "root", appPath + "/m4sd");
 +   CPC.m4_log = conf.getIntValue("m4", "log", 0) & 1;
 +   CPC.printer_sound = conf.getIntValue("system", "printer_sound", 1) & 1;
++   CPC.drive_sound = conf.getIntValue("system", "drive_sound", 1) & 1;
++   CPC.tape_sound = conf.getIntValue("system", "tape_sound", 1) & 1;
 +   CPC.printer_8bit = conf.getIntValue("system", "printer_8bit", 0) & 1;
 +   CPC.char_mode = conf.getIntValue("input", "char_mode", 0) & 1;
 +   CPC.char_umlauts = conf.getIntValue("input", "char_umlauts", 1) & 1;
     CPC.keyboard = conf.getIntValue("system", "keyboard", 0);
     if (CPC.keyboard > MAX_ROM_MODS) {
        CPC.keyboard = 0;
-@@ -1893,7 +1963,8 @@ void loadConfiguration (t_CPC &CPC, const std::string& configFilename)
+@@ -1893,7 +1968,8 @@ void loadConfiguration (t_CPC &CPC, const std::string& configFilename)
     }
     CPC.scr_led = conf.getIntValue("video", "scr_led", 1) & 1;
     CPC.scr_fps = conf.getIntValue("video", "scr_fps", 0) & 1;
@@ -557,7 +562,7 @@ index bd57d45..301f30a 100644
     CPC.scr_intensity = conf.getIntValue("video", "scr_intensity", 10);
     CPC.scr_remanency = conf.getIntValue("video", "scr_remanency", 0) & 1;
     if ((CPC.scr_intensity < 5) || (CPC.scr_intensity > 15)) {
-@@ -1929,6 +2000,11 @@ void loadConfiguration (t_CPC &CPC, const std::string& configFilename)
+@@ -1929,6 +2005,11 @@ void loadConfiguration (t_CPC &CPC, const std::string& configFilename)
     CPC.current_tape_path =
       CPC.tape_path = conf.getStringValue("file", "tape_path", appPath + "/tape/");
  
@@ -569,7 +574,7 @@ index bd57d45..301f30a 100644
     int iFmt = FIRST_CUSTOM_DISK_FORMAT;
     for (int i = iFmt; i < MAX_DISK_FORMAT; i++) { // loop through all user definable disk formats
        char chFmtId[14];
-@@ -1940,6 +2016,9 @@ void loadConfiguration (t_CPC &CPC, const std::string& configFilename)
+@@ -1940,6 +2021,9 @@ void loadConfiguration (t_CPC &CPC, const std::string& configFilename)
        }
     }
     CPC.printer_file = conf.getStringValue("file", "printer_file", appPath + "/printer.dat");
@@ -579,7 +584,7 @@ index bd57d45..301f30a 100644
     CPC.sdump_dir = conf.getStringValue("file", "sdump_dir", appPath + "/screenshots");
  
     CPC.rom_path = conf.getStringValue("rom", "rom_path", appPath + "/rom/");
-@@ -1967,8 +2046,20 @@ bool saveConfiguration (t_CPC &CPC, const std::string& configFilename)
+@@ -1967,8 +2051,22 @@ bool saveConfiguration (t_CPC &CPC, const std::string& configFilename)
     conf.setIntValue("system", "speed", CPC.speed); // original CPC speed
     conf.setIntValue("system", "auto_pause", CPC.auto_pause);
     conf.setIntValue("system", "printer", CPC.printer);
@@ -594,13 +599,15 @@ index bd57d45..301f30a 100644
 +   conf.setStringValue("m4", "root", CPC.m4_root);
 +   conf.setIntValue("m4", "log", CPC.m4_log);
 +   conf.setIntValue("system", "printer_sound", CPC.printer_sound);
++   conf.setIntValue("system", "drive_sound", CPC.drive_sound);
++   conf.setIntValue("system", "tape_sound", CPC.tape_sound);
 +   conf.setIntValue("system", "printer_8bit", CPC.printer_8bit);
 +   conf.setIntValue("input", "char_mode", CPC.char_mode);
 +   conf.setIntValue("input", "char_umlauts", CPC.char_umlauts);
     conf.setIntValue("system", "keyboard", CPC.keyboard);
     conf.setIntValue("system", "boot_time", CPC.boot_time);
     conf.setIntValue("system", "joystick_emulation", static_cast<int>(CPC.joystick_emulation));
-@@ -1985,6 +2076,7 @@ bool saveConfiguration (t_CPC &CPC, const std::string& configFilename)
+@@ -1985,6 +2083,7 @@ bool saveConfiguration (t_CPC &CPC, const std::string& configFilename)
     conf.setIntValue("video", "scr_led", CPC.scr_led);
     conf.setIntValue("video", "scr_fps", CPC.scr_fps);
     conf.setIntValue("video", "scr_tube", CPC.scr_tube);
@@ -608,7 +615,7 @@ index bd57d45..301f30a 100644
     conf.setIntValue("video", "scr_intensity", CPC.scr_intensity);
     conf.setIntValue("video", "scr_remanency", CPC.scr_remanency);
     conf.setIntValue("video", "scr_window", CPC.scr_window);
-@@ -2015,6 +2107,7 @@ bool saveConfiguration (t_CPC &CPC, const std::string& configFilename)
+@@ -2015,6 +2114,7 @@ bool saveConfiguration (t_CPC &CPC, const std::string& configFilename)
        conf.setStringValue("file", chFmtId, serializeDiskFormat(disk_format[iFmt]));
     }
     conf.setStringValue("file", "printer_file", CPC.printer_file);
@@ -616,7 +623,7 @@ index bd57d45..301f30a 100644
     conf.setStringValue("file", "sdump_dir", CPC.sdump_dir);
  
     conf.setStringValue("rom", "rom_path", CPC.rom_path);
-@@ -2111,6 +2204,111 @@ void showVKeyboard()
+@@ -2111,6 +2211,113 @@ void showVKeyboard()
     cleanupShowUI(guiBackSurface);
  }
  
@@ -684,21 +691,23 @@ index bd57d45..301f30a 100644
 +   SDL_SetRelativeMouseMode(SDL_bool(false));
 +   ShowCursor(true);
 +   bool accepted = false, save = false;
-+   // Integer scaling with nearest-neighbour filtering keeps the window sharp
++   // The window is built at 2x (geometry and font) on big screens: that is sharper than stretching a small one
 +   int sscale = 1;
 +   SDL_Rect usable;
 +   if (SDL_GetDisplayUsableBounds(0, &usable) == 0 && usable.h >= SETTINGS_HEIGHT * 2 + 80 && usable.w >= SETTINGS_WIDTH * 2 + 40) sscale = 2;
++   g_settingsScale = sscale;
++   const int pw = SETTINGS_WIDTH * sscale, ph = SETTINGS_HEIGHT * sscale;
 +   SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
-+   SDL_Window* window = SDL_CreateWindow("Caprice32 - Settings", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SETTINGS_WIDTH * sscale, SETTINGS_HEIGHT * sscale, SDL_WINDOW_SHOWN);
++   SDL_Window* window = SDL_CreateWindow("Caprice32 - Settings", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, pw, ph, SDL_WINDOW_SHOWN);
 +   SDL_Renderer* renderer = window ? SDL_CreateRenderer(window, -1, 0) : nullptr;
-+   if (renderer) SDL_RenderSetLogicalSize(renderer, SETTINGS_WIDTH, SETTINGS_HEIGHT);
-+   SDL_Surface* surface = renderer ? SDL_CreateRGBSurface(0, SETTINGS_WIDTH, SETTINGS_HEIGHT, renderer_bpp(renderer), 0, 0, 0, 0) : nullptr;
++   SDL_Surface* surface = renderer ? SDL_CreateRGBSurface(0, pw, ph, renderer_bpp(renderer), 0, 0, 0, 0) : nullptr;
 +   SDL_Texture* texture = surface ? SDL_CreateTextureFromSurface(renderer, surface) : nullptr;
 +   if (texture) {
 +      try {
-+         CapriceGui capriceGui(window, /*bInMainView=*/false, 1); // logical size handles mouse scaling
++         CapriceGui capriceGui(window, /*bInMainView=*/false, 1);
 +         capriceGui.Init();
-+         wGui::CapriceSettingsView view(capriceGui, surface, renderer, texture, wGui::CRect(0, 0, SETTINGS_WIDTH, SETTINGS_HEIGHT));
++         capriceGui.SetDefaultFontEngine(capriceGui.GetFontEngine(CPC.resources_path + "/vera_sans.ttf", static_cast<unsigned char>(10 * sscale)));
++         wGui::CapriceSettingsView view(capriceGui, surface, renderer, texture, wGui::CRect(0, 0, pw, ph));
 +         view.Frame()->SelectPage(g_settingsPage);
 +         capriceGui.Exec();
 +         accepted = view.Frame()->Accepted();
@@ -728,15 +737,16 @@ index bd57d45..301f30a 100644
  void showGui()
  {
     auto guiBackSurface = prepareShowUI();
-@@ -2238,6 +2436,7 @@ bool driveAltered() {
+@@ -2238,6 +2445,8 @@ bool driveAltered() {
  
  void doCleanUp ()
  {
 +   printer_sound_shutdown();
++   drive_sound_shutdown();
     printer_stop();
     emulator_shutdown();
  
-@@ -2786,6 +2985,9 @@ int cap32_main (int argc, char **argv)
+@@ -2786,6 +2995,9 @@ int cap32_main (int argc, char **argv)
     }
     parseArguments(argc, argv, slot_list, args);
  
@@ -746,17 +756,18 @@ index bd57d45..301f30a 100644
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER | SDL_INIT_NOPARACHUTE) < 0) { // initialize SDL
        fprintf(stderr, "SDL_Init() failed: %s\n", SDL_GetError());
        exit(-1);
-@@ -2929,6 +3131,9 @@ int cap32_main (int argc, char **argv)
+@@ -2929,6 +3141,10 @@ int cap32_main (int argc, char **argv)
          applyKeypress(CPC.InputMapper->CPCscancodeFromCPCkey(CPC_J0_DOWN), keyboard_matrix, false, false);
          applyKeypress(CPC.InputMapper->CPCscancodeFromCPCkey(CPC_J0_UP), keyboard_matrix, false, false);
        }
 +      printer_sound_update();
++      drive_sound_update();
 +      charmode_sync_text_input();
 +      charmode_update(dwFrameCountOverall);
        while (SDL_PollEvent(&event)) {
           bool processed = false;
           if (!devtools.empty()) {
-@@ -2944,7 +3149,12 @@ int cap32_main (int argc, char **argv)
+@@ -2944,7 +3160,12 @@ int cap32_main (int argc, char **argv)
           }
           if (processed) continue;
           switch (event.type) {
@@ -769,7 +780,7 @@ index bd57d45..301f30a 100644
                 {
                    CPCScancode scancode = CPC.InputMapper->CPCscancodeFromKeysym(event.key.keysym);
                    LOG_VERBOSE("Keyboard: pressed: " << SDL_GetKeyName(event.key.keysym.sym) << " - keycode: " << keycode_names[event.key.keysym.sym] << " (" << event.key.keysym.sym << ") - scancode: " << scancode_names[event.key.keysym.scancode] << " (" << event.key.keysym.scancode << ") - CPC key: " << CPC.InputMapper->CPCkeyToString(CPC.InputMapper->CPCkeyFromKeysym(event.key.keysym)) << " - CPC scancode: " << scancode);
-@@ -2955,6 +3165,7 @@ int cap32_main (int argc, char **argv)
+@@ -2955,6 +3176,7 @@ int cap32_main (int argc, char **argv)
                 break;
  
              case SDL_KEYUP:
@@ -777,7 +788,7 @@ index bd57d45..301f30a 100644
                 {
                    CPCScancode scancode = CPC.InputMapper->CPCscancodeFromKeysym(event.key.keysym);
                    if (!(scancode & MOD_EMU_KEY)) {
-@@ -2965,6 +3176,7 @@ int cap32_main (int argc, char **argv)
+@@ -2965,6 +3187,7 @@ int cap32_main (int argc, char **argv)
                          case CAP32_GUI:
                            {
                              showGui();
@@ -785,7 +796,7 @@ index bd57d45..301f30a 100644
                              break;
                            }
  
-@@ -3130,6 +3342,7 @@ int cap32_main (int argc, char **argv)
+@@ -3130,6 +3353,7 @@ int cap32_main (int argc, char **argv)
                    if (event.jbutton.button == CPC.joystick_menu_button)
                    {
                      showGui();
@@ -793,7 +804,7 @@ index bd57d45..301f30a 100644
                    }
                    if (event.jbutton.button == CPC.joystick_vkeyboard_button)
                    {
-@@ -3326,7 +3539,7 @@ int cap32_main (int argc, char **argv)
+@@ -3326,7 +3550,7 @@ int cap32_main (int argc, char **argv)
                 print(static_cast<byte *>(back_surface->pixels) + CPC.scr_line_offs, chStr, true); // display the frames per second counter
              }
              asic_draw_sprites();
@@ -803,10 +814,19 @@ index bd57d45..301f30a 100644
                dumpScreen();
                take_screenshot = false;
 diff --git a/src/cap32.h b/src/cap32.h
-index e66e69f..9345938 100644
+index e66e69f..fe624d7 100644
 --- a/src/cap32.h
 +++ b/src/cap32.h
-@@ -208,11 +208,21 @@ class t_CPC {
+@@ -41,7 +41,7 @@ class InputMapper;
+ //#define DEBUG_TAPE
+ //#define DEBUG_Z80
+ 
+-#define VERSION_STRING "v4.6.0"
++#define VERSION_STRING "v4.7.2"
+ 
+ #ifndef _MAX_PATH
+  #ifdef _POSIX_PATH_MAX
+@@ -208,11 +208,23 @@ class t_CPC {
     unsigned int tape_play_button;
     unsigned int printer;
     unsigned int printer_port;
@@ -822,13 +842,15 @@ index e66e69f..9345938 100644
 +   std::string m4_root;            // directory that is the M4 'SD card'
 +   unsigned int m4_log;
 +   unsigned int printer_sound;     // 1 = printer needle noise
++   unsigned int drive_sound;       // 1 = floppy drive noise (motor, head steps)
++   unsigned int tape_sound;        // 1 = tape loading sound (the real tape signal)
 +   unsigned int printer_8bit;      // 1 = 8-bit printer hardware mod (8th data bit taken from PPI port C bit 5)
 +   unsigned int char_mode;         // 1 = PC keyboard types characters (looked up in the CPC key tables)
 +   unsigned int char_umlauts;      // 1 = PC umlauts/sz produce the ASCII positions a German CPC character set uses
     unsigned int joystick_menu_button;
     unsigned int joystick_vkeyboard_button;
     PhazerType phazer_emulation;
-@@ -228,7 +238,8 @@ class t_CPC {
+@@ -228,7 +240,8 @@ class t_CPC {
     unsigned int scr_oglscanlines;
     unsigned int scr_led;
     unsigned int scr_fps;
@@ -838,7 +860,7 @@ index e66e69f..9345938 100644
     unsigned int scr_intensity;
     unsigned int scr_remanency;
     unsigned int scr_window;
-@@ -284,6 +295,9 @@ class t_CPC {
+@@ -284,6 +297,9 @@ class t_CPC {
     t_slot cartridge;
  
     std::string printer_file;
@@ -848,7 +870,7 @@ index e66e69f..9345938 100644
     std::string sdump_dir;
  
     std::string rom_path;
-@@ -435,6 +449,10 @@ void ga_init_banking(t_MemBankConfig& membank_config, unsigned char RAM_bank);
+@@ -435,6 +451,10 @@ void ga_init_banking(t_MemBankConfig& membank_config, unsigned char RAM_bank);
  bool driveAltered();
  void emulator_reset();
  int  emulator_init();
@@ -1077,6 +1099,187 @@ index 0000000..22599e8
 +dword charmode_scancode_for_code(byte code);
 +// For tests: CPC character code for a Unicode code point (umlauts -> ASCII positions), or -1
 +int charmode_cpc_code(unsigned int codepoint);
++
++#endif
+diff --git a/src/drive_sound.cpp b/src/drive_sound.cpp
+new file mode 100644
+index 0000000..8158fe0
+--- /dev/null
++++ b/src/drive_sound.cpp
+@@ -0,0 +1,158 @@
++#include "drive_sound.h"
++
++#include <SDL.h>
++#include <atomic>
++#include <cmath>
++#include <cstdint>
++#include <cstdlib>
++#include "cap32.h"
++#include "disk.h"
++#include "log.h"
++
++extern t_CPC CPC;
++extern t_FDC FDC;
++extern t_drive driveA;
++extern t_drive driveB;
++extern "C" {
++extern const int16_t PrinterSound_Data[];
++extern const unsigned PrinterSound_Samples;
++}
++
++namespace {
++
++constexpr int RATE = 16000;   // same as the printer recording
++constexpr int STEP_GAP = RATE * 7 / 1000;       // 7 ms between two head steps
++constexpr Uint32 IDLE_MS = 400;
++
++SDL_AudioDeviceID device = 0;
++bool openFailed = false;
++bool playing = false;
++Uint32 lastActive = 0;
++std::atomic<bool> motor{false};
++std::atomic<int> pendingSteps{0};
++std::atomic<int> volume{80};
++std::atomic<bool> printerOn{false};
++unsigned printerPos = 0;
++
++// synthesis state (audio thread only)
++unsigned long long sampleCount = 0;
++float lowNoise = 0.f, lowNoise2 = 0.f;
++int clickPos = -1;       // position inside the current click, -1 = none
++int gapCounter = 0;
++uint32_t rng = 12345;
++
++float noise()
++{
++  rng = rng * 1664525u + 1013904223u;
++  return static_cast<float>(static_cast<int32_t>(rng)) / 2147483648.f;
++}
++
++void SDLCALL callback(void*, Uint8* stream, int len)
++{
++  int16_t* out = reinterpret_cast<int16_t*>(stream);
++  const int samples = len / 2;
++  const bool m = motor.load();
++  const float vol = volume.load() / 100.f;
++  for (int i = 0; i < samples; ++i) {
++    float v = 0.f;
++    if (m) {
++      // spindle: low rumble plus a quiet bearing hum
++      lowNoise += 0.04f * (noise() - lowNoise);
++      lowNoise2 += 0.3f * (noise() - lowNoise2);
++      const float t = static_cast<float>(sampleCount) / RATE;
++      v += 0.55f * lowNoise + 0.05f * lowNoise2 + 0.06f * std::sin(6.2831853f * 96.f * t) + 0.03f * std::sin(6.2831853f * 192.f * t);
++    }
++    // head step: short thump with a click
++    if (clickPos < 0 && gapCounter <= 0 && pendingSteps.load() > 0) {
++      pendingSteps.fetch_sub(1);
++      clickPos = 0;
++      gapCounter = STEP_GAP;
++    }
++    if (gapCounter > 0) --gapCounter;
++    if (clickPos >= 0) {
++      const float t = static_cast<float>(clickPos) / RATE;
++      const float env = std::exp(-t / 0.0022f);
++      v += 1.8f * env * (0.6f * noise() + 0.8f * std::sin(6.2831853f * 140.f * t));
++      if (++clickPos > RATE / 40) clickPos = -1;
++    }
++    ++sampleCount;
++    float s = v * 5000.f * vol;
++    if (printerOn.load()) {
++      s += PrinterSound_Data[printerPos];
++      if (++printerPos >= PrinterSound_Samples) printerPos = 0;
++    }
++    if (s > 32000.f) s = 32000.f;
++    if (s < -32000.f) s = -32000.f;
++    out[i] = static_cast<int16_t>(s);
++  }
++}
++
++bool Open()
++{
++  if (device != 0) return true;
++  if (openFailed) return false;
++  SDL_AudioSpec want{}, have{};
++  want.freq = RATE;
++  want.format = AUDIO_S16SYS;
++  want.channels = 1;
++  want.samples = 512;
++  want.callback = callback;
++  device = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
++  if (device == 0) {
++    LOG_ERROR("Drive sound: could not open audio: " << SDL_GetError());
++    openFailed = true;
++    return false;
++  }
++  return true;
++}
++
++void stop()
++{
++  if (playing && device != 0) SDL_PauseAudioDevice(device, 1);
++  playing = false;
++}
++
++} // namespace
++
++void drive_sound_update()
++{
++  static unsigned prevA = 0, prevB = 0;
++  const bool on = CPC.drive_sound != 0;
++  const Uint32 now = SDL_GetTicks();
++  const bool motorOn = on && FDC.motor && (driveA.tracks != 0 || driveB.tracks != 0);
++  motor.store(motorOn);
++  volume.store(static_cast<int>(CPC.snd_volume));
++  int steps = 0;
++  if (on) {
++    unsigned a = driveA.current_track, b = driveB.current_track;
++    steps += static_cast<int>(a > prevA ? a - prevA : prevA - a);
++    steps += static_cast<int>(b > prevB ? b - prevB : prevB - b);
++  }
++  prevA = driveA.current_track;
++  prevB = driveB.current_track;
++  if (steps > 12) steps = 12;
++  if (steps > 0) pendingSteps.fetch_add(steps);
++  if (motorOn || pendingSteps.load() > 0 || printerOn.load()) {
++    lastActive = now;
++    if (!playing && Open()) {
++      SDL_PauseAudioDevice(device, 0);
++      playing = true;
++    }
++  } else if (playing && now - lastActive > IDLE_MS) {
++    stop();
++  }
++}
++
++void effects_set_printer(bool on)
++{
++  printerOn.store(on);
++}
++
++void drive_sound_shutdown()
++{
++  stop();
++  if (device != 0) {
++    SDL_CloseAudioDevice(device);
++    device = 0;
++  }
++}
+diff --git a/src/drive_sound.h b/src/drive_sound.h
+new file mode 100644
+index 0000000..e549563
+--- /dev/null
++++ b/src/drive_sound.h
+@@ -0,0 +1,11 @@
++// Floppy drive noise (motor hum and head step clicks), synthesized, as WinAPE's "Disc Drive Sounds".
++// Played on one extra audio device, independent of the CPC sound; the printer noise is mixed in there too
++// (some audio drivers do not allow more than one extra device).
++#ifndef DRIVE_SOUND_H
++#define DRIVE_SOUND_H
++
++void drive_sound_update();    // call once per frame (also starts/stops the shared effects device)
++void effects_set_printer(bool on);   // printer needle noise on/off (mixed into the same audio device)
++void drive_sound_shutdown();  // close the audio device
 +
 +#endif
 diff --git a/src/filedialog.cpp b/src/filedialog.cpp
@@ -1340,10 +1543,10 @@ index b5295c2..08ef632 100644
      RESET,
 diff --git a/src/gui/includes/CapriceSettings.h b/src/gui/includes/CapriceSettings.h
 new file mode 100644
-index 0000000..9360e21
+index 0000000..8c5ea65
 --- /dev/null
 +++ b/src/gui/includes/CapriceSettings.h
-@@ -0,0 +1,191 @@
+@@ -0,0 +1,192 @@
 +// 'Settings' window for Caprice32: the pages and settings of the WinAPE setup dialog
 +// (General, Display, Sound, Memory, Input, Other).
 +//
@@ -1369,8 +1572,9 @@ index 0000000..9360e21
 +#include "cap32.h"
 +#include "filedialog.h"
 +
-+constexpr int SETTINGS_WIDTH = 640;
++constexpr int SETTINGS_WIDTH = 640;   // logical size, multiplied by g_settingsScale
 +constexpr int SETTINGS_HEIGHT = 424;
++extern int g_settingsScale;          // 1 or 2: the whole window (geometry and font) is built at this scale
 +
 +namespace wGui
 +{
@@ -1500,7 +1704,7 @@ index 0000000..9360e21
 +        CEditBox* m_pPrinterFile = nullptr;
 +        CheckItem m_net4cpc{};
 +        CheckItem m_multiface{};
-+        CheckItem m_m4{}, m_prn8bit{}, m_sndPrinter{};
++        CheckItem m_m4{}, m_prn8bit{}, m_sndPrinter{}, m_sndDrive{}, m_sndTape{};
 +        CEditBox* m_pM4Rom = nullptr;
 +        CEditBox* m_pM4Root = nullptr;
 +        CEditBox* m_pMf2Rom = nullptr;
@@ -1627,6 +1831,19 @@ index 0000000..56f3a23
 +  { 77, "FIRE 2", 540, 79, 37, 25 },
 +  { 78, "FIRE 3", 520, 107, 37, 25 },
 +};
+diff --git a/src/gui/includes/wg_fontengine.h b/src/gui/includes/wg_fontengine.h
+index c612d48..172f19a 100644
+--- a/src/gui/includes/wg_fontengine.h
++++ b/src/gui/includes/wg_fontengine.h
+@@ -68,6 +68,8 @@ protected:
+ 	static FT_Library m_FTLibrary;  //!< The FreeType library
+ 	static bool m_bFTLibraryLoaded;  //!< Indicates if the FreeType library has been loaded
+ 	FT_Face m_FontFace;  //!< The FreeType font face
++	bool m_bMono = true;  //!< small sizes: hinted bitmap glyphs without anti-aliasing (crisp); big sizes: anti-aliased
++	int m_iLoadFlags = FT_LOAD_TARGET_MONO | FT_LOAD_FORCE_AUTOHINT;
+ 	std::map<char, FT_BitmapGlyphRec> m_CachedGlyphMap;  //!< A cached map of the rendered glyphs
+ 	std::map<char, FT_Glyph_Metrics> m_CachedMetricsMap;  //!< A cached map of the glyph metrics
+ };
 diff --git a/src/gui/includes/wg_window.h b/src/gui/includes/wg_window.h
 index b5ebd99..e82b496 100644
 --- a/src/gui/includes/wg_window.h
@@ -1856,10 +2073,10 @@ index 2144580..c127024 100644
      case MenuItem::LOAD_SAVE:
 diff --git a/src/gui/src/CapriceSettings.cpp b/src/gui/src/CapriceSettings.cpp
 new file mode 100644
-index 0000000..899f108
+index 0000000..db952c0
 --- /dev/null
 +++ b/src/gui/src/CapriceSettings.cpp
-@@ -0,0 +1,811 @@
+@@ -0,0 +1,819 @@
 +// 'Settings' window for Caprice32: the pages and settings of the WinAPE setup dialog.
 +// See CapriceSettings.h.
 +
@@ -1883,6 +2100,8 @@ index 0000000..899f108
 +// CPC emulation properties, defined in cap32.h:
 +extern t_CPC CPC;
 +
++int g_settingsScale = 1;
++
 +namespace wGui {
 +
 +namespace {
@@ -1895,6 +2114,7 @@ index 0000000..899f108
 +constexpr int PAGE_Y = 32;
 +constexpr int PAGE_W = SETTINGS_WIDTH - 10;
 +constexpr int PAGE_H = 318;
++inline int S(int v) { return v * g_settingsScale; }
 +
 +const char* const kPageNames[] = { "General", "Display", "Sound", "Memory", "Input", "Other" };
 +
@@ -1917,8 +2137,8 @@ index 0000000..899f108
 +CapriceSettings::CheckItem CapriceSettings::AddCheck(CWindow* parent, int x, int y, const std::string& text, bool value, bool available)
 +{
 +  CheckItem item;
-+  item.box = new CCheckBox(CRect(CPoint(x, y), 10, 10), parent);
-+  item.label = new CLabel(CPoint(x + 16, y + 1), parent, text);
++  item.box = new CCheckBox(CRect(CPoint(S(x), S(y)), S(10), S(10)), parent);
++  item.label = new CLabel(CPoint(S(x + 16), S(y + 1)), parent, text);
 +  item.available = available;
 +  if (value) {
 +    item.box->SetCheckBoxState(CCheckBox::CHECKED);
@@ -1936,8 +2156,8 @@ index 0000000..899f108
 +CapriceSettings::RadioItem CapriceSettings::AddRadio(CWindow* parent, int x, int y, const std::string& text, bool value, bool available)
 +{
 +  RadioItem item;
-+  item.radio = new CRadioButton(CPoint(x, y), 10, parent);
-+  item.label = new CLabel(CPoint(x + 16, y + 1), parent, text);
++  item.radio = new CRadioButton(CPoint(S(x), S(y)), S(10), parent);
++  item.label = new CLabel(CPoint(S(x + 16), S(y + 1)), parent, text);
 +  item.available = available;
 +  if (value) {
 +    item.radio->SetState(CRadioButton::CHECKED);
@@ -1954,7 +2174,7 @@ index 0000000..899f108
 +
 +CLabel* CapriceSettings::AddLabel(CWindow* parent, int x, int y, const std::string& text, bool available)
 +{
-+  CLabel* label = new CLabel(CPoint(x, y), parent, text);
++  CLabel* label = new CLabel(CPoint(S(x), S(y)), parent, text);
 +  if (!available) {
 +    label->SetEnabled(false);
 +  }
@@ -1963,7 +2183,7 @@ index 0000000..899f108
 +
 +CDropDown* CapriceSettings::AddDropDown(CWindow* parent, int x, int y, int w, const std::vector<std::string>& items, int selected, bool available)
 +{
-+  CDropDown* dd = new CDropDown(CRect(CPoint(x, y), w, 16), parent, false);
++  CDropDown* dd = new CDropDown(CRect(CPoint(S(x), S(y)), S(w), S(16)), parent, false);
 +  for (const auto& item : items) {
 +    dd->AddItem(SListItem(item));
 +  }
@@ -1981,7 +2201,7 @@ index 0000000..899f108
 +
 +CScrollBar* CapriceSettings::AddSlider(CWindow* parent, int x, int y, int w, int min, int max, int step, int value, bool available)
 +{
-+  CScrollBar* bar = new CScrollBar(CRect(CPoint(x, y), w, 12), parent, CScrollBar::HORIZONTAL);
++  CScrollBar* bar = new CScrollBar(CRect(CPoint(S(x), S(y)), S(w), S(12)), parent, CScrollBar::HORIZONTAL);
 +  bar->SetMinLimit(min);
 +  bar->SetMaxLimit(max);
 +  bar->SetStepSize(step);
@@ -1996,7 +2216,7 @@ index 0000000..899f108
 +
 +CEditBox* CapriceSettings::AddEdit(CWindow* parent, int x, int y, int w, const std::string& text, bool available, bool readOnly)
 +{
-+  CEditBox* edit = new CEditBox(CRect(CPoint(x, y), w, 16), parent);
++  CEditBox* edit = new CEditBox(CRect(CPoint(S(x), S(y)), S(w), S(16)), parent);
 +  edit->SetWindowText(text);
 +  edit->SetReadOnly(readOnly);
 +  if (available) {
@@ -2009,7 +2229,7 @@ index 0000000..899f108
 +
 +CButton* CapriceSettings::AddButton(CWindow* parent, int x, int y, int w, int h, const std::string& text, bool available)
 +{
-+  CButton* button = new CButton(CRect(CPoint(x, y), w, h), parent, text);
++  CButton* button = new CButton(CRect(CPoint(S(x), S(y)), S(w), S(h)), parent, text);
 +  if (available) {
 +    button->SetIsFocusable(true);
 +  } else {
@@ -2036,7 +2256,7 @@ index 0000000..899f108
 +    if (b.mode == FileDialogMode::FOLDER && !current.empty()) start = current;
 +    std::string result = filedialog_pick(b.kind, b.title, b.filterName, b.patterns, available, start, b.mode);
 +    if (!available) {
-+      CMessageBox* box = new CMessageBox(CRect(CPoint(SETTINGS_WIDTH / 2 - 160, 150), 320, 70), this, nullptr, "File dialog",
++      CMessageBox* box = new CMessageBox(CRect(CPoint(S(SETTINGS_WIDTH / 2 - 160), S(150)), S(320), S(70)), this, nullptr, "File dialog",
 +                                         "No file dialog found (install zenity). Type the path instead.", CMessageBox::BUTTON_OK);
 +      box->SetModal(true);
 +    } else if (!result.empty()) {
@@ -2050,7 +2270,7 @@ index 0000000..899f108
 +CGroupBox* CapriceSettings::AddGroup(CWindow* parent, int x, int y, int w, int h, const std::string& caption)
 +{
 +  m_sGroupName = caption;
-+  return new CGroupBox(CRect(CPoint(x, y), w, h), parent, caption);
++  return new CGroupBox(CRect(CPoint(S(x), S(y)), S(w), S(h)), parent, caption);
 +}
 +
 +// ============================================================================================
@@ -2061,18 +2281,19 @@ index 0000000..899f108
 +  CFrame(WindowRect, pParent, pFontEngine, "Caprice32 - Settings", false)
 +{
 +  SetModal(true);
++  SetTitleBarHeight(0); // the operating system draws the title
 +  Application().MessageServer()->RegisterMessageClient(this, CMessage::CTRL_VALUECHANGE);
 +  Application().MessageServer()->RegisterMessageClient(this, CMessage::CTRL_VALUECHANGING);
 +  Application().MessageServer()->RegisterMessageClient(this, CMessage::KEYBOARD_KEYDOWN);
 +
 +  // Pages
-+  m_pNavigationBar = new CNavigationBar(this, CPoint(PAGE_X, 6), 6, 100, 22);
++  m_pNavigationBar = new CNavigationBar(this, CPoint(S(PAGE_X), S(6)), 6, S(100), S(22));
 +  for (const char* name : kPageNames) {
 +    m_pNavigationBar->AddItem(SNavBarItem(name));
 +  }
 +  m_pNavigationBar->SetIsFocusable(true);
 +  for (size_t i = 0; i < 6; ++i) {
-+    m_pages.push_back(new CGroupBox(CRect(CPoint(PAGE_X, PAGE_Y), PAGE_W, PAGE_H), this, ""));
++    m_pages.push_back(new CGroupBox(CRect(CPoint(S(PAGE_X), S(PAGE_Y)), S(PAGE_W), S(PAGE_H)), this, ""));
 +  }
 +  m_sGroupName = "";
 +  m_sPageName = kPageNames[0]; BuildGeneral(m_pages[0]);
@@ -2160,18 +2381,18 @@ index 0000000..899f108
 +  m_colour = AddRadio(page, 14, 6, "Colour", CPC.scr_tube == 0);
 +  m_green = AddRadio(page, 14, 6, "Green", CPC.scr_tube == 1);
 +  m_grey = AddRadio(page, 14, 6, "Greyscale", CPC.scr_tube == 2);
-+  m_colour.radio->MoveWindow(CPoint(0, 0));
-+  m_colour.label->MoveWindow(CPoint(16, 1));
-+  m_green.radio->MoveWindow(CPoint(90, 0));
-+  m_green.label->MoveWindow(CPoint(106, 1));
-+  m_grey.radio->MoveWindow(CPoint(180, 0));
-+  m_grey.label->MoveWindow(CPoint(196, 1));
++  m_colour.radio->MoveWindow(CPoint(S(0), S(0)));
++  m_colour.label->MoveWindow(CPoint(S(16), S(1)));
++  m_green.radio->MoveWindow(CPoint(S(90), S(0)));
++  m_green.label->MoveWindow(CPoint(S(106), S(1)));
++  m_grey.radio->MoveWindow(CPoint(S(180), S(0)));
++  m_grey.label->MoveWindow(CPoint(S(196), S(1)));
 +
 +  // ---- Caprice32 video ----
 +  m_sGroupName = "Video";
 +  CGroupBox* video = AddGroup(page, 8, 30, 296, 176, "Video");
 +  AddLabel(video, 8, 6, "Video plugin");
-+  m_pPlugin = new CDropDown(CRect(CPoint(90, 4), 196, 16), video, false);
++  m_pPlugin = new CDropDown(CRect(CPoint(S(90), S(4)), S(196), S(16)), video, false);
 +  unsigned int index = 0;
 +  int selected = 0;
 +  for (const auto& plugin : video_plugin_list) {
@@ -2244,7 +2465,9 @@ index 0000000..899f108
 +
 +  m_sGroupName = "Other Sounds";
 +  CGroupBox* other = AddGroup(page, 56, 104, 397, 41, "Other Sounds");
-+  m_sndPrinter = AddCheck(other, 8, 14 - GY + 1, "Printer sound", CPC.printer_sound == 1);
++  m_sndDrive = AddCheck(other, 8, 14 - GY + 1, "Disc drive sounds", CPC.drive_sound == 1);
++  m_sndTape = AddCheck(other, 140, 14 - GY + 1, "Tape loading sounds", CPC.tape_sound == 1);
++  m_sndPrinter = AddCheck(other, 290, 14 - GY + 1, "Printer sound", CPC.printer_sound == 1);
 +  m_sGroupName = "";
 +}
 +
@@ -2318,7 +2541,7 @@ index 0000000..899f108
 +    }
 +    return;
 +  }
-+  new CapriceRomSlots(CRect(CPoint(SETTINGS_WIDTH / 2 - 125, 40), 250, 200), this, nullptr, "", static_cast<int>(slot), m_pRomButtons.at(slot));
++  new CapriceRomSlots(CRect(CPoint(S(SETTINGS_WIDTH / 2 - 125), S(40)), S(250), S(200)), this, nullptr, "", static_cast<int>(slot), m_pRomButtons.at(slot));
 +}
 +
 +// ============================================================================================
@@ -2378,7 +2601,7 @@ index 0000000..899f108
 +  m_prn8bit = AddCheck(printer, 200, 32 - GY + 1, "8-bit (HW mod)", CPC.printer_8bit == 1);
 +
 +  // panels (one is visible, depending on the selected radio button)
-+  m_pPanelPdf = new CWindow(CRect(CPoint(2, 36), 292, 22), printer);
++  m_pPanelPdf = new CWindow(CRect(CPoint(S(2), S(36)), S(292), S(22)), printer);
 +  m_pPdfModel = AddDropDown(m_pPanelPdf, 4, 2, 172, {}, -1);
 +  for (int i = 0; i < pdfprinter_model_count(); ++i) {
 +    m_pPdfModel->AddItem(SListItem(pdfprinter_model_name(i)));
@@ -2402,7 +2625,7 @@ index 0000000..899f108
 +    m_pPdfPaper->SelectItem(0);
 +  }
 +
-+  m_pPanelFile = new CWindow(CRect(CPoint(2, 36), 292, 22), printer);
++  m_pPanelFile = new CWindow(CRect(CPoint(S(2), S(36)), S(292), S(22)), printer);
 +  m_pPrinterFile = AddEdit(m_pPanelFile, 4, 2, 264, CPC.printer_file);
 +  AddBrowse(m_pPanelFile, 272, 2, m_pPrinterFile, "printout", "Printer output file", "Printer output", "*.*", FileDialogMode::SAVE);
 +
@@ -2543,6 +2766,8 @@ index 0000000..899f108
 +  CPC.m4_root = m_pM4Root->GetWindowText();
 +  CPC.printer_8bit = Checked(m_prn8bit) ? 1 : 0;
 +  CPC.printer_sound = Checked(m_sndPrinter) ? 1 : 0;
++  CPC.drive_sound = Checked(m_sndDrive) ? 1 : 0;
++  CPC.tape_sound = Checked(m_sndTape) ? 1 : 0;
 +  CPC.mf2 = Checked(m_multiface) ? 1 : 0;
 +  CPC.rom_mf2 = m_pMf2Rom->GetWindowText();
 +  g_cartToLoad = (Checked(m_cart) && !m_pCartFile->GetWindowText().empty()) ? m_pCartFile->GetWindowText() : "";
@@ -2553,7 +2778,7 @@ index 0000000..899f108
 +  const std::string text =
 +    "OK: use the settings. Save: use them and write cap32.cfg.\n"
 +    "Cancel: discard. Files are chosen in your PC's file dialog.";
-+  CMessageBox* box = new CMessageBox(CRect(CPoint(SETTINGS_WIDTH / 2 - 190, 150), 380, 70), this, nullptr, "Help", text, CMessageBox::BUTTON_OK);
++  CMessageBox* box = new CMessageBox(CRect(CPoint(S(SETTINGS_WIDTH / 2 - 190), S(150)), S(380), S(70)), this, nullptr, "Help", text, CMessageBox::BUTTON_OK);
 +  box->SetModal(true);
 +}
 +
@@ -2642,7 +2867,7 @@ index 0000000..899f108
 +  CView(application, surface, nullptr, WindowRect), m_pRenderer(renderer), m_pTexture(texture)
 +{
 +  Application().MessageServer()->RegisterMessageClient(this, CMessage::CTRL_MESSAGEBOXRETURN);
-+  m_pFrame = new CapriceSettings(CRect(CPoint(0, 0), SETTINGS_WIDTH, SETTINGS_HEIGHT), this, nullptr);
++  m_pFrame = new CapriceSettings(CRect(CPoint(0, 0), S(SETTINGS_WIDTH), S(SETTINGS_HEIGHT)), this, nullptr);
 +}
 +
 +void CapriceSettingsView::PaintToSurface(SDL_Surface& ScreenSurface, SDL_Surface& FloatingSurface, const CPoint& Offset) const
@@ -2671,6 +2896,36 @@ index 0000000..899f108
 +}
 +
 +} // namespace wGui
+diff --git a/src/gui/src/wg_checkbox.cpp b/src/gui/src/wg_checkbox.cpp
+index 0f022e2..b97dc22 100644
+--- a/src/gui/src/wg_checkbox.cpp
++++ b/src/gui/src/wg_checkbox.cpp
+@@ -22,6 +22,7 @@
+ //
+ 
+ 
++#include <algorithm>
+ #include "wg_checkbox.h"
+ #include "wg_application.h"
+ #include "log.h"
+@@ -114,9 +115,14 @@ void CCheckBox::Draw() const
+       {
+         //Painter.DrawLine(SubRect.TopLeft(), SubRect.BottomRight(), DEFAULT_LINE_COLOR);
+         //Painter.DrawLine(SubRect.BottomLeft(), SubRect.TopRight(), DEFAULT_LINE_COLOR);
+-        SDL_Rect SourceRect = m_WindowRect.SizeRect().SDLRect();
+-        SDL_Rect DestRect = SubRect.SDLRect();
+-        SDL_BlitSurface(m_hBitmapCheck.Bitmap(), &SourceRect, m_pSDLSurface, &DestRect);
++        // check mark drawn as lines, so that it grows with the box
++        const int w = m_WindowRect.Width(), h = m_WindowRect.Height();
++        const int thick = std::max(1, w / 8);
++        const CPoint p1(w * 22 / 100, h * 52 / 100), p2(w * 42 / 100, h * 74 / 100), p3(w * 80 / 100, h * 26 / 100);
++        for (int t = 0; t < thick; ++t) {
++          Painter.DrawLine(CPoint(p1.XPos(), p1.YPos() + t), CPoint(p2.XPos(), p2.YPos() + t), COLOR_BLACK);
++          Painter.DrawLine(CPoint(p2.XPos(), p2.YPos() + t), CPoint(p3.XPos(), p3.YPos() + t), COLOR_BLACK);
++        }
+       }
+     }
+   }
 diff --git a/src/gui/src/wg_editbox.cpp b/src/gui/src/wg_editbox.cpp
 index bdf40d7..31d4fda 100644
 --- a/src/gui/src/wg_editbox.cpp
@@ -2685,25 +2940,34 @@ index bdf40d7..31d4fda 100644
  		{
  			CPoint BoundedDims;
 diff --git a/src/gui/src/wg_fontengine.cpp b/src/gui/src/wg_fontengine.cpp
-index 120527e..12c6f4b 100644
+index 120527e..cf0a9ac 100644
 --- a/src/gui/src/wg_fontengine.cpp
 +++ b/src/gui/src/wg_fontengine.cpp
-@@ -67,7 +67,8 @@ FT_BitmapGlyphRec* CFontEngine::RenderGlyph(char Char)
+@@ -49,6 +49,8 @@ CFontEngine::CFontEngine(const std::string& sFontFileName, unsigned char FontSiz
+ 	{
+ 		throw(Wg_Ex_FreeType("Unable to create font face.", "CFontEngine::CFontEngine"));
+ 	}
++	m_bMono = FontSize <= 12;
++	m_iLoadFlags = m_bMono ? (FT_LOAD_TARGET_MONO | FT_LOAD_FORCE_AUTOHINT) : (FT_LOAD_TARGET_LIGHT | FT_LOAD_FORCE_AUTOHINT);
+ 	if (FT_Set_Char_Size(m_FontFace, 0, FontSize * 64, 0, 0))
+ 	{
+ 		throw(Wg_Ex_FreeType("Unable to set character size.", "CFontEngine::CFontEngine"));
+@@ -67,7 +69,8 @@ FT_BitmapGlyphRec* CFontEngine::RenderGlyph(char Char)
  	auto glyphIter = m_CachedGlyphMap.find(Char);
  	if (glyphIter == m_CachedGlyphMap.end())
  	{
 -		if (FT_Load_Char(m_FontFace, Char, FT_LOAD_DEFAULT))
 +		// Hinted, non anti-aliased glyphs: crisp text at small sizes
-+		if (FT_Load_Char(m_FontFace, Char, FT_LOAD_TARGET_MONO | FT_LOAD_FORCE_AUTOHINT))
++		if (FT_Load_Char(m_FontFace, Char, m_iLoadFlags))
  		{
  			throw(Wg_Ex_FreeType("Unable to render glyph.", "CFontEngine::RenderGlyph"));
  		}
-@@ -76,10 +77,30 @@ FT_BitmapGlyphRec* CFontEngine::RenderGlyph(char Char)
+@@ -76,10 +79,30 @@ FT_BitmapGlyphRec* CFontEngine::RenderGlyph(char Char)
  		{
  			throw(Wg_Ex_FreeType("Unable to copy glyph.", "CFontEngine::RenderGlyph"));
  		}
 -		if (FT_Glyph_To_Bitmap(&glyph, ft_render_mode_normal, nullptr, 1))
-+		if (FT_Glyph_To_Bitmap(&glyph, FT_RENDER_MODE_MONO, nullptr, 1))
++		if (FT_Glyph_To_Bitmap(&glyph, m_bMono ? FT_RENDER_MODE_MONO : FT_RENDER_MODE_NORMAL, nullptr, 1))
  		{
  			throw(Wg_Ex_FreeType("Unable to render glyph.", "CFontEngine::RenderGlyph"));
  		}
@@ -2730,15 +2994,37 @@ index 120527e..12c6f4b 100644
  		glyphIter = m_CachedGlyphMap.insert(std::make_pair(Char, *reinterpret_cast<FT_BitmapGlyph>(glyph))).first;
  	}
  	return &(glyphIter->second);
-@@ -90,7 +111,7 @@ FT_Glyph_Metrics* CFontEngine::GetMetrics(char Char)
+@@ -90,7 +113,7 @@ FT_Glyph_Metrics* CFontEngine::GetMetrics(char Char)
  	auto glyphIter = m_CachedMetricsMap.find(Char);
  	if (glyphIter == m_CachedMetricsMap.end())
  	{
 -		if (FT_Load_Char(m_FontFace, Char, FT_LOAD_DEFAULT))
-+		if (FT_Load_Char(m_FontFace, Char, FT_LOAD_TARGET_MONO | FT_LOAD_FORCE_AUTOHINT))
++		if (FT_Load_Char(m_FontFace, Char, m_iLoadFlags))
  		{
  			throw(Wg_Ex_FreeType("Unable to render glyph.", "CFontEngine::RenderGlyph"));
  		}
+diff --git a/src/gui/src/wg_navigationbar.cpp b/src/gui/src/wg_navigationbar.cpp
+index 4212fc8..7992289 100644
+--- a/src/gui/src/wg_navigationbar.cpp
++++ b/src/gui/src/wg_navigationbar.cpp
+@@ -72,7 +72,7 @@ void CNavigationBar::SetItemWidth(unsigned int iItemWidth) {
+ 
+ unsigned int CNavigationBar::AddItem(SNavBarItem NavBarItem) {
+ 	m_Items.push_back(NavBarItem);
+-	m_RenderedStrings.emplace_back(m_pFontEngine, NavBarItem.sItemText, CRenderedString::VALIGN_BOTTOM, CRenderedString::HALIGN_CENTER);
++	m_RenderedStrings.emplace_back(m_pFontEngine, NavBarItem.sItemText, CRenderedString::VALIGN_CENTER, CRenderedString::HALIGN_CENTER);
+     if (!NavBarItem.sPictureFilename.empty()) {
+         m_Bitmaps.push_back(new CBitmapFileResourceHandle(NavBarItem.sPictureFilename));
+         // Set transparency color to COLOR_WHITE:
+@@ -162,7 +162,7 @@ void CNavigationBar::Draw() const {
+ 				ItemRect.Grow(-1);
+         // '- CPoint(0,1)' is to move the reference point one pixel up (otherwise the lowest pixels of p,g,q,y 
+         // etc. are not fully visible.
+-				m_RenderedStrings.at(i).Draw(m_pSDLSurface, ItemRect, ItemRect.BottomLeft() - CPoint(0, 1) + CPoint(ItemRect.Width()/2, 0), m_Items[i].ItemColor);
++				m_RenderedStrings.at(i).Draw(m_pSDLSurface, ItemRect, ItemRect.TopLeft() + CPoint(ItemRect.Width()/2, ItemRect.Height()/2), m_Items[i].ItemColor);
+         // Draw the picture (if available):
+         if (m_Bitmaps.at(i) != nullptr) {
+           SDL_Rect DestRect = ItemRect.Move(9, 1).SDLRect();
 diff --git a/src/gui/src/wg_window.cpp b/src/gui/src/wg_window.cpp
 index 8590507..3c9ee62 100644
 --- a/src/gui/src/wg_window.cpp
@@ -2851,10 +3137,10 @@ index 8590507..3c9ee62 100644
  			{
 diff --git a/src/m4.h b/src/m4.h
 new file mode 100644
-index 0000000..cafdea1
+index 0000000..d1227ef
 --- /dev/null
 +++ b/src/m4.h
-@@ -0,0 +1,18 @@
+@@ -0,0 +1,19 @@
 +// M4 board (Duke) emulation: the board's SD card, network and HTTP functions are provided by the host.
 +// The original M4 ROM runs unchanged in expansion ROM slot 6; this code answers its commands on ports &FE00/&FC00.
 +#ifndef M4_H
@@ -2866,6 +3152,7 @@ index 0000000..cafdea1
 +extern int m4_enabled;
 +void m4_port_write(unsigned int porthi, unsigned int data);
 +void m4_set_rom(unsigned char* rom16k);   // the 16 KB image of the M4 ROM (answers are written into it)
++void m4_patch_drive_switch(unsigned char* rom16k); // |A and |B switch to the floppy drives even while the SD card is active (M4 ROM 2.0.6)
 +void m4_set_root(const char* directory);  // directory that serves as the "SD card"
 +void m4_set_log(int on);                  // 1 = log commands to stderr
 +#ifdef __cplusplus
@@ -3591,10 +3878,10 @@ index 0000000..86249b3
 +#endif
 diff --git a/src/m4/m4plat_host.c b/src/m4/m4plat_host.c
 new file mode 100644
-index 0000000..781974f
+index 0000000..fb23466
 --- /dev/null
 +++ b/src/m4/m4plat_host.c
-@@ -0,0 +1,123 @@
+@@ -0,0 +1,139 @@
 +/* M4 board emulation - host platform layer for Caprice32 (Linux/macOS: POSIX, Windows: Win32 + Winsock) */
 +#ifdef _WIN32
 +#include <winsock2.h>
@@ -3718,6 +4005,22 @@ index 0000000..781974f
 +void P_log(const char*s){ if(P_logon) fputs(s,stderr); }
 +
 +void P_init(void){}
++
++/* |A and |B switch to the floppy drives even while the SD card is active, as on the real board.
++   In M4 ROM 2.0.6 they do nothing then. The routines at &DD7B/&DD8B jump to small helpers in free ROM space
++   (&E500/&E530) that first restore the saved AMSDOS vectors and then take the normal way through AMSDOS. */
++void m4_patch_drive_switch(u8 *p)
++{
++  static const u8 hA[34]={0xe5,0xc5,0xf5,0x3a,0x78,0xbc,0xfe,0xa4,0x20,0x13,0x3a,0x10,0xf4,0xb7,0x28,0x0d,0xd5,0x21,0x16,0xf4,0x11,0x77,0xbc,0x01,0x30,0x00,0xed,0xb0,0xd1,0x06,0x07,0xc3,0x41,0xdd};
++  static const u8 hB[34]={0xe5,0xc5,0xf5,0x3a,0x78,0xbc,0xfe,0xa4,0x20,0x13,0x3a,0x10,0xf4,0xb7,0x28,0x0d,0xd5,0x21,0x16,0xf4,0x11,0x77,0xbc,0x01,0x30,0x00,0xed,0xb0,0xd1,0x06,0x08,0xc3,0x41,0xdd};
++  static const u8 oA[16]={0xe5,0xc5,0xf5,0x3a,0x78,0xbc,0xfe,0xa4,0xca,0x53,0xdd,0x06,0x07,0xc3,0x41,0xdd};
++  static const u8 oB[16]={0xe5,0xc5,0xf5,0x3a,0x78,0xbc,0xfe,0xa4,0xca,0x53,0xdd,0x06,0x08,0xc3,0x41,0xdd};
++  if(!p) return;
++  if(memcmp(p+0x1D7B,oA,16)||memcmp(p+0x1D8B,oB,16)) return;   /* only touch the known ROM (2.0.6) */
++  memcpy(p+0x2500,hA,34); memcpy(p+0x2530,hB,34);
++  memset(p+0x1D7B,0,16); p[0x1D7B]=0xC3; p[0x1D7C]=0x00; p[0x1D7D]=0xE5;
++  memset(p+0x1D8B,0,16); p[0x1D8B]=0xC3; p[0x1D8C]=0x30; p[0x1D8D]=0xE5;
++}
 diff --git a/src/pe/include/pe/driver.h b/src/pe/include/pe/driver.h
 new file mode 100644
 index 0000000..c3c32d6
@@ -13420,10 +13723,10 @@ index 0000000..8e5e67a
 +}
 diff --git a/src/printer_pdf.cpp b/src/printer_pdf.cpp
 new file mode 100644
-index 0000000..df7d2a5
+index 0000000..d505fc9
 --- /dev/null
 +++ b/src/printer_pdf.cpp
-@@ -0,0 +1,194 @@
+@@ -0,0 +1,195 @@
 +#include "printer_pdf.h"
 +
 +#include <atomic>
@@ -13597,21 +13900,22 @@ index 0000000..df7d2a5
 +   return g_active;
 +}
 +
-+void pdfprinter_port_write(unsigned char val, bool bit8) {
++bool pdfprinter_port_write(unsigned char val, bool bit8) {
 +   std::lock_guard<std::mutex> lock(g_mutex);
 +   const bool strobe = (val & 0x80) != 0 && (g_prev & 0x80) == 0;
 +   g_prev = val;
 +   if (!strobe) {
-+      return;
++      return false;
 +   }
 +   if (!g_job && !open_job_locked()) {
-+      return;
++      return false;
 +   }
 +   g_pending.push_back(static_cast<std::uint8_t>((val & 0x7F) | (bit8 ? 0x80 : 0)));
 +   g_last_data = std::chrono::steady_clock::now();
 +   if (g_pending.size() >= 256) {
 +      flush_pending_locked();
 +   }
++   return true;
 +}
 +
 +std::string pdfprinter_last_file() {
@@ -13620,7 +13924,7 @@ index 0000000..df7d2a5
 +}
 diff --git a/src/printer_pdf.h b/src/printer_pdf.h
 new file mode 100644
-index 0000000..f6384d3
+index 0000000..2112121
 --- /dev/null
 +++ b/src/printer_pdf.h
 @@ -0,0 +1,38 @@
@@ -13649,7 +13953,7 @@ index 0000000..f6384d3
 +void pdfprinter_stop();
 +bool pdfprinter_active();
 +// Value written to the CPC printer port (&EFxx). The data byte (bits 0-6) is taken on the rising edge of bit 7 (strobe).
-+void pdfprinter_port_write(unsigned char val, bool bit8 = false);   // bit8: 8th data bit (8-bit printer hardware mod)
++bool pdfprinter_port_write(unsigned char val, bool bit8 = false);   // bit8: 8th data bit (8-bit printer hardware mod)
 +// Lists for the settings dialog: printer models (id as used in cap32.cfg, display name) and paper types.
 +int pdfprinter_model_count();
 +const char* pdfprinter_model_id(int index);
@@ -13664,82 +13968,38 @@ index 0000000..f6384d3
 +#endif
 diff --git a/src/printer_sound.cpp b/src/printer_sound.cpp
 new file mode 100644
-index 0000000..8bd3235
+index 0000000..1e2435d
 --- /dev/null
 +++ b/src/printer_sound.cpp
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,48 @@
 +#include "printer_sound.h"
 +
 +#include <SDL.h>
-+#include <atomic>
-+#include <cstdint>
 +#include "cap32.h"
-+#include "log.h"
-+
-+extern "C" {
-+extern const int16_t PrinterSound_Data[];
-+extern const unsigned PrinterSound_Samples;
-+}
++#include "drive_sound.h"
 +
 +extern t_CPC CPC;
 +
 +namespace {
-+
 +constexpr Uint32 TAIL_MS = 1500;           // noise continues this long after the last character
-+
-+SDL_AudioDeviceID device = 0;
-+bool openFailed = false;
 +bool playing = false;
 +Uint32 lastChar = 0;
-+std::atomic<unsigned> position{0};
-+
-+void SDLCALL callback(void*, Uint8* stream, int len)
-+{
-+  int16_t* out = reinterpret_cast<int16_t*>(stream);
-+  const int samples = len / 2;
-+  unsigned pos = position.load();
-+  for (int i = 0; i < samples; ++i) {
-+    out[i] = PrinterSound_Data[pos];
-+    if (++pos >= PrinterSound_Samples) pos = 0;     // loop
-+  }
-+  position.store(pos);
 +}
-+
-+bool Open()
-+{
-+  if (device != 0) return true;
-+  if (openFailed) return false;
-+  SDL_AudioSpec want{}, have{};
-+  want.freq = 16000;
-+  want.format = AUDIO_S16SYS;
-+  want.channels = 1;
-+  want.samples = 1024;
-+  want.callback = callback;
-+  device = SDL_OpenAudioDevice(nullptr, 0, &want, &have, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | SDL_AUDIO_ALLOW_SAMPLES_CHANGE);
-+  if (device == 0) {
-+    LOG_ERROR("Printer sound: could not open audio: " << SDL_GetError());
-+    openFailed = true;
-+    return false;
-+  }
-+  if (have.format != AUDIO_S16SYS || have.channels != 1) {
-+    LOG_ERROR("Printer sound: unsupported audio format");
-+    SDL_CloseAudioDevice(device);
-+    device = 0;
-+    openFailed = true;
-+    return false;
-+  }
-+  return true;
-+}
-+
-+} // namespace
 +
 +void printer_sound_note_char()
 +{
 +  if (!CPC.printer_sound) return;
-+  lastChar = SDL_GetTicks();
-+  if (!playing && Open()) {
-+    SDL_PauseAudioDevice(device, 0);
++  const Uint32 now = SDL_GetTicks();
++  // a few stray bytes (e.g. a hardware probe by a ROM) are not printing: the noise starts with the 3rd character within a second
++  static Uint32 firstChar = 0;
++  static int count = 0;
++  if (count == 0 || now - firstChar > 1000) { firstChar = now; count = 0; }
++  ++count;
++  lastChar = now;
++  if (count < 3) return;
++  if (!playing) {
 +    playing = true;
++    effects_set_printer(true);
 +  }
 +}
 +
@@ -13752,19 +14012,13 @@ index 0000000..8bd3235
 +
 +void printer_sound_stop()
 +{
-+  if (playing && device != 0) {
-+    SDL_PauseAudioDevice(device, 1);
-+  }
 +  playing = false;
++  effects_set_printer(false);
 +}
 +
 +void printer_sound_shutdown()
 +{
 +  printer_sound_stop();
-+  if (device != 0) {
-+    SDL_CloseAudioDevice(device);
-+    device = 0;
-+  }
 +}
 diff --git a/src/printer_sound.h b/src/printer_sound.h
 new file mode 100644
@@ -13783,3 +14037,25 @@ index 0000000..333874e
 +void printer_sound_shutdown();    // close the audio device
 +
 +#endif
+diff --git a/src/psg.cpp b/src/psg.cpp
+index b0d6336..7415120 100644
+--- a/src/psg.cpp
++++ b/src/psg.cpp
+@@ -362,7 +362,7 @@ inline void Synthesizer_Mixer_Q()
+ {
+    int LevL, LevR, k;
+ 
+-   LevL = bTapeLevel ? LevelTape : 0; // start with the tape signal
++   LevL = (bTapeLevel && CPC.tape_sound) ? LevelTape : 0; // start with the tape signal
+    if (CPC.snd_pp_device) {
+       LevL += Level_PP[CPC.printer_port];
+    }
+@@ -503,7 +503,7 @@ inline void Synthesizer_Mixer_Q_Mono()
+ {
+    int Lev, k;
+ 
+-   Lev = bTapeLevel ? LevelTape : 0; // start with the tape signal
++   Lev = (bTapeLevel && CPC.tape_sound) ? LevelTape : 0; // start with the tape signal
+    if (CPC.snd_pp_device) {
+       Lev += Level_PP[CPC.printer_port];
+    }
