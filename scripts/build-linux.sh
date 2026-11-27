@@ -9,7 +9,7 @@ REPO="${CAP32_REPO:-https://github.com/ColinPitrat/caprice32.git}"
 COMMIT="$(tr -d '[:space:]' < "$HERE/UPSTREAM_COMMIT")"
 WORK="$HERE/build"
 OUT="$HERE/out"
-VERSION="${VERSION:-$(grep -ho '^+#define VERSION_STRING "[^"]*"' "$HERE"/patches/*.patch | sed 's/.*"\(.*\)"/\1/' | head -n1 || true)}"
+VERSION="${VERSION:-$(grep -ho '^+#define VERSION_STRING "[^"]*"' "$HERE/patches/0001-winape-erweiterungen.patch" | sed 's/.*"\(.*\)"/\1/' | head -n1 || true)}"
 VERSION="${VERSION:-$(date +%Y%m%d)}"
 ARCH="$(uname -m)"
 NAME="cap32-winape-${VERSION}-linux-${ARCH}"
@@ -22,7 +22,8 @@ git clone --quiet "$REPO" "$WORK"
 git -C "$WORK" checkout --quiet "$COMMIT"
 
 echo "==> Patches anwenden"
-for p in "$HERE"/patches/*.patch; do
+# nur dieses eine Patch (weitere Dateien im Ordner patches/ werden ignoriert)
+for p in "$HERE/patches/0001-winape-erweiterungen.patch"; do
   git -C "$WORK" apply --check "$p"
   git -C "$WORK" apply "$p"
 done
