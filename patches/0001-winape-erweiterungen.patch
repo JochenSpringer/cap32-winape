@@ -200,10 +200,10 @@ index 0000000..adb0639
 +- **8-bit (HW mod)** (Einstellungen > Other > Printer, `printer_8bit=1`): Umbau nach „8-Bit-Drucker am CPC 464“ (Happy Computer 7/1986). Das 8. Datenbit kommt von PPI-Port C, Bit 5 und wird an der Strobe-Flanke abgetastet. Damit kommen Zeichen 128–255 und 8-Bit-Grafik an.
 diff --git a/doc/settings_winape.md b/doc/settings_winape.md
 new file mode 100644
-index 0000000..592e842
+index 0000000..e53789a
 --- /dev/null
 +++ b/doc/settings_winape.md
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,79 @@
 +# Einstellungsfenster (WinAPE-Stil)
 +
 +Menü **Options** öffnet ein eigenes Fenster mit den Seiten des WinAPE-Setup-Dialogs:
@@ -276,6 +276,13 @@ index 0000000..592e842
 +- Other / Printer: file selection button (the path can be typed)
 +- Other / Other Devices: Dobbertin SmartWatch ROM Select
 +- Other / Multiface Two: ROM file selection (file name comes from cap32.cfg: rom_mf2)
++
++## Aufruf (F1-Menü)
++
++Die sechs Reiter (General, Display, Sound, Memory, Input, Other) sind Hauptmenüpunkte
++im F1-Menü. Jeder öffnet das Einstellungsfenster direkt auf der passenden Seite.
++Der alte Caprice-Punkt "Options" entfällt. Das Fenster wird mit ganzzahliger
++Skalierung (2x auf großen Bildschirmen) und ohne Weichzeichnen dargestellt.
 diff --git a/makefile b/makefile
 index 8c6e516..45e9bb3 100644
 --- a/makefile
@@ -357,7 +364,7 @@ index 8c6e516..45e9bb3 100644
  
  
 diff --git a/src/cap32.cpp b/src/cap32.cpp
-index bd57d45..4b160b7 100644
+index bd57d45..ea2a0a5 100644
 --- a/src/cap32.cpp
 +++ b/src/cap32.cpp
 @@ -29,6 +29,10 @@
@@ -532,10 +539,11 @@ index bd57d45..4b160b7 100644
     conf.setStringValue("file", "sdump_dir", CPC.sdump_dir);
  
     conf.setStringValue("rom", "rom_path", CPC.rom_path);
-@@ -2111,6 +2190,90 @@ void showVKeyboard()
+@@ -2111,6 +2190,98 @@ void showVKeyboard()
     cleanupShowUI(guiBackSurface);
  }
  
++int g_settingsPage = 0;
 +bool g_showSettingsRequested = false;
 +
 +// Applies what the settings window changed (same logic as the old options dialog)
@@ -586,15 +594,22 @@ index bd57d45..4b160b7 100644
 +   SDL_SetRelativeMouseMode(SDL_bool(false));
 +   ShowCursor(true);
 +   bool accepted = false, save = false;
-+   SDL_Window* window = SDL_CreateWindow("Caprice32 - Settings", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SETTINGS_WIDTH, SETTINGS_HEIGHT, SDL_WINDOW_SHOWN);
++   // Integer scaling with nearest-neighbour filtering keeps the window sharp
++   int sscale = 1;
++   SDL_Rect usable;
++   if (SDL_GetDisplayUsableBounds(0, &usable) == 0 && usable.h >= SETTINGS_HEIGHT * 2 + 80 && usable.w >= SETTINGS_WIDTH * 2 + 40) sscale = 2;
++   SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
++   SDL_Window* window = SDL_CreateWindow("Caprice32 - Settings", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SETTINGS_WIDTH * sscale, SETTINGS_HEIGHT * sscale, SDL_WINDOW_SHOWN);
 +   SDL_Renderer* renderer = window ? SDL_CreateRenderer(window, -1, 0) : nullptr;
++   if (renderer) SDL_RenderSetLogicalSize(renderer, SETTINGS_WIDTH, SETTINGS_HEIGHT);
 +   SDL_Surface* surface = renderer ? SDL_CreateRGBSurface(0, SETTINGS_WIDTH, SETTINGS_HEIGHT, renderer_bpp(renderer), 0, 0, 0, 0) : nullptr;
 +   SDL_Texture* texture = surface ? SDL_CreateTextureFromSurface(renderer, surface) : nullptr;
 +   if (texture) {
 +      try {
-+         CapriceGui capriceGui(window, /*bInMainView=*/false, 1);
++         CapriceGui capriceGui(window, /*bInMainView=*/false, 1); // logical size handles mouse scaling
 +         capriceGui.Init();
 +         wGui::CapriceSettingsView view(capriceGui, surface, renderer, texture, wGui::CRect(0, 0, SETTINGS_WIDTH, SETTINGS_HEIGHT));
++         view.Frame()->SelectPage(g_settingsPage);
 +         capriceGui.Exec();
 +         accepted = view.Frame()->Accepted();
 +         save = view.Frame()->SaveRequested();
@@ -623,7 +638,7 @@ index bd57d45..4b160b7 100644
  void showGui()
  {
     auto guiBackSurface = prepareShowUI();
-@@ -2238,6 +2401,7 @@ bool driveAltered() {
+@@ -2238,6 +2409,7 @@ bool driveAltered() {
  
  void doCleanUp ()
  {
@@ -631,7 +646,15 @@ index bd57d45..4b160b7 100644
     printer_stop();
     emulator_shutdown();
  
-@@ -2929,6 +3093,9 @@ int cap32_main (int argc, char **argv)
+@@ -2786,6 +2958,7 @@ int cap32_main (int argc, char **argv)
+    }
+    parseArguments(argc, argv, slot_list, args);
+ 
++   SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER | SDL_INIT_NOPARACHUTE) < 0) { // initialize SDL
+       fprintf(stderr, "SDL_Init() failed: %s\n", SDL_GetError());
+       exit(-1);
+@@ -2929,6 +3102,9 @@ int cap32_main (int argc, char **argv)
          applyKeypress(CPC.InputMapper->CPCscancodeFromCPCkey(CPC_J0_DOWN), keyboard_matrix, false, false);
          applyKeypress(CPC.InputMapper->CPCscancodeFromCPCkey(CPC_J0_UP), keyboard_matrix, false, false);
        }
@@ -641,7 +664,7 @@ index bd57d45..4b160b7 100644
        while (SDL_PollEvent(&event)) {
           bool processed = false;
           if (!devtools.empty()) {
-@@ -2944,7 +3111,12 @@ int cap32_main (int argc, char **argv)
+@@ -2944,7 +3120,12 @@ int cap32_main (int argc, char **argv)
           }
           if (processed) continue;
           switch (event.type) {
@@ -654,7 +677,7 @@ index bd57d45..4b160b7 100644
                 {
                    CPCScancode scancode = CPC.InputMapper->CPCscancodeFromKeysym(event.key.keysym);
                    LOG_VERBOSE("Keyboard: pressed: " << SDL_GetKeyName(event.key.keysym.sym) << " - keycode: " << keycode_names[event.key.keysym.sym] << " (" << event.key.keysym.sym << ") - scancode: " << scancode_names[event.key.keysym.scancode] << " (" << event.key.keysym.scancode << ") - CPC key: " << CPC.InputMapper->CPCkeyToString(CPC.InputMapper->CPCkeyFromKeysym(event.key.keysym)) << " - CPC scancode: " << scancode);
-@@ -2955,6 +3127,7 @@ int cap32_main (int argc, char **argv)
+@@ -2955,6 +3136,7 @@ int cap32_main (int argc, char **argv)
                 break;
  
              case SDL_KEYUP:
@@ -662,7 +685,7 @@ index bd57d45..4b160b7 100644
                 {
                    CPCScancode scancode = CPC.InputMapper->CPCscancodeFromKeysym(event.key.keysym);
                    if (!(scancode & MOD_EMU_KEY)) {
-@@ -2965,6 +3138,7 @@ int cap32_main (int argc, char **argv)
+@@ -2965,6 +3147,7 @@ int cap32_main (int argc, char **argv)
                          case CAP32_GUI:
                            {
                              showGui();
@@ -670,7 +693,7 @@ index bd57d45..4b160b7 100644
                              break;
                            }
  
-@@ -3130,6 +3304,7 @@ int cap32_main (int argc, char **argv)
+@@ -3130,6 +3313,7 @@ int cap32_main (int argc, char **argv)
                    if (event.jbutton.button == CPC.joystick_menu_button)
                    {
                      showGui();
@@ -679,7 +702,7 @@ index bd57d45..4b160b7 100644
                    if (event.jbutton.button == CPC.joystick_vkeyboard_button)
                    {
 diff --git a/src/cap32.h b/src/cap32.h
-index e66e69f..68950a9 100644
+index e66e69f..f99d86f 100644
 --- a/src/cap32.h
 +++ b/src/cap32.h
 @@ -208,11 +208,21 @@ class t_CPC {
@@ -714,11 +737,12 @@ index e66e69f..68950a9 100644
     std::string sdump_dir;
  
     std::string rom_path;
-@@ -435,6 +448,8 @@ void ga_init_banking(t_MemBankConfig& membank_config, unsigned char RAM_bank);
+@@ -435,6 +448,9 @@ void ga_init_banking(t_MemBankConfig& membank_config, unsigned char RAM_bank);
  bool driveAltered();
  void emulator_reset();
  int  emulator_init();
-+extern bool g_showSettingsRequested; // set by the menu: open the settings window after the menu closes
++extern bool g_showSettingsRequested;
++extern int g_settingsPage; // set by the menu: open the settings window after the menu closes
 +void showSettings();
  int  video_set_palette();
  void init_joystick_emulation();
@@ -943,6 +967,24 @@ index 0000000..22599e8
 +int charmode_cpc_code(unsigned int codepoint);
 +
 +#endif
+diff --git a/src/gui/includes/CapriceMenu.h b/src/gui/includes/CapriceMenu.h
+index b5295c2..08ef632 100644
+--- a/src/gui/includes/CapriceMenu.h
++++ b/src/gui/includes/CapriceMenu.h
+@@ -11,7 +11,12 @@ namespace wGui
+ {
+   enum class MenuItem {
+     NONE,
+-    OPTIONS,
++    GENERAL,
++    DISPLAY,
++    SOUND,
++    MEMORY,
++    INPUT,
++    OTHER,
+     LOAD_SAVE,
+     MEMORY_TOOL,
+     RESET,
 diff --git a/src/gui/includes/CapriceSettings.h b/src/gui/includes/CapriceSettings.h
 new file mode 100644
 index 0000000..db06790
@@ -1247,16 +1289,100 @@ index b5ebd99..e82b496 100644
  private:
    CWindow(const CWindow&) = delete;
  	CWindow& operator=(const CWindow&) = delete;
+diff --git a/src/gui/src/CapriceGuiView.cpp b/src/gui/src/CapriceGuiView.cpp
+index 6a674fb..b8dfbef 100644
+--- a/src/gui/src/CapriceGuiView.cpp
++++ b/src/gui/src/CapriceGuiView.cpp
+@@ -6,7 +6,7 @@ using namespace wGui;
+ CapriceGuiView::CapriceGuiView(CApplication& application, SDL_Surface* surface, SDL_Surface* backSurface, const CRect& WindowRect) : CView(application, surface, backSurface, WindowRect)
+ {
+   Application().MessageServer()->RegisterMessageClient(this, CMessage::CTRL_MESSAGEBOXRETURN);
+-  m_menuFrame = new CapriceMenu(CRect(CPoint(m_pScreenSurface->w / 2 - 70, m_pScreenSurface->h / 2 - 110), 140, 240), this, m_pScreenSurface, nullptr);
++  m_menuFrame = new CapriceMenu(CRect(CPoint(m_pScreenSurface->w / 2 - 70, m_pScreenSurface->h / 2 - 160), 140, 320), this, m_pScreenSurface, nullptr);
+ }
+ 
+ // judb Show the Caprice32 emulation display, and our CCaGuiView (CView) on top of it.
 diff --git a/src/gui/src/CapriceMenu.cpp b/src/gui/src/CapriceMenu.cpp
-index 2144580..33c9dfd 100644
+index 2144580..c127024 100644
 --- a/src/gui/src/CapriceMenu.cpp
 +++ b/src/gui/src/CapriceMenu.cpp
-@@ -144,7 +144,9 @@ bool CapriceMenu::HandleMessage(CMessage* pMessage)
+@@ -5,7 +5,6 @@
+ #include <string>
+ #include "std_ex.h"
+ #include "CapriceMenu.h"
+-#include "CapriceOptions.h"
+ #include "CapriceLoadSave.h"
+ #include "CapriceMemoryTool.h"
+ #include "CapriceAbout.h"
+@@ -22,7 +21,12 @@ CapriceMenu::CapriceMenu(const CRect& WindowRect, CWindow* pParent, SDL_Surface*
+   Application().MessageServer()->RegisterMessageClient(this, CMessage::CTRL_MESSAGEBOXRETURN);
+   SetModal(true);
+   std::map<MenuItem, std::string> buttons = {
+-    { MenuItem::OPTIONS, "Options" },
++    { MenuItem::GENERAL, "General" },
++    { MenuItem::DISPLAY, "Display" },
++    { MenuItem::SOUND, "Sound" },
++    { MenuItem::MEMORY, "Memory" },
++    { MenuItem::INPUT, "Input" },
++    { MenuItem::OTHER, "Other" },
+     { MenuItem::LOAD_SAVE, "Load / Save" },
+     { MenuItem::MEMORY_TOOL, "Memory tool" },
+     { MenuItem::RESET, "Reset (F5)" },
+@@ -30,7 +34,7 @@ CapriceMenu::CapriceMenu(const CRect& WindowRect, CWindow* pParent, SDL_Surface*
+     { MenuItem::RESUME, "Resume" },
+     { MenuItem::QUIT, "Quit (F10)" }
+   };
+-  CPoint button_space = CPoint(0, 30);
++  CPoint button_space = CPoint(0, 24);
+   CRect button_rect(CPoint(20, 10), 100, 20);
+ 
+   for(auto& b : buttons) {
+@@ -89,9 +93,29 @@ bool CapriceMenu::HandleMessage(CMessage* pMessage)
+                 }
+               }
+               break;
++            case SDLK_g:
++              bHandled = true;
++              selected = MenuItem::GENERAL;
++              break;
++            case SDLK_d:
++              bHandled = true;
++              selected = MenuItem::DISPLAY;
++              break;
++            case SDLK_s:
++              bHandled = true;
++              selected = MenuItem::SOUND;
++              break;
++            case SDLK_e:
++              bHandled = true;
++              selected = MenuItem::MEMORY;
++              break;
++            case SDLK_i:
++              bHandled = true;
++              selected = MenuItem::INPUT;
++              break;
+             case SDLK_o:
+               bHandled = true;
+-              selected = MenuItem::OPTIONS;
++              selected = MenuItem::OTHER;
+               break;
+             case SDLK_l:
+               bHandled = true;
+@@ -142,9 +166,17 @@ bool CapriceMenu::HandleMessage(CMessage* pMessage)
+       bHandled = CFrame::HandleMessage(pMessage);
+   }
    switch (selected) {
-     case MenuItem::OPTIONS:
+-    case MenuItem::OPTIONS:
++    case MenuItem::GENERAL:
++    case MenuItem::DISPLAY:
++    case MenuItem::SOUND:
++    case MenuItem::MEMORY:
++    case MenuItem::INPUT:
++    case MenuItem::OTHER:
        {
 -        /*CapriceOptions* pOptionsBox = */new CapriceOptions(CRect(ViewToClient(CPoint(m_pScreenSurface->w /2 - 165, m_pScreenSurface->h /2 - 127)), 330, 260), this, nullptr);
 +        // WinAPE-style settings window (own window), opened once the menu is closed
++        g_settingsPage = (int)selected - (int)MenuItem::GENERAL;
 +        g_showSettingsRequested = true;
 +        CloseFrame();
          break;
