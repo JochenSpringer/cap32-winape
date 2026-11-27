@@ -364,7 +364,7 @@ index 8c6e516..45e9bb3 100644
  
  
 diff --git a/src/cap32.cpp b/src/cap32.cpp
-index bd57d45..ea2a0a5 100644
+index bd57d45..b40d874 100644
 --- a/src/cap32.cpp
 +++ b/src/cap32.cpp
 @@ -29,6 +29,10 @@
@@ -646,15 +646,17 @@ index bd57d45..ea2a0a5 100644
     printer_stop();
     emulator_shutdown();
  
-@@ -2786,6 +2958,7 @@ int cap32_main (int argc, char **argv)
+@@ -2786,6 +2958,9 @@ int cap32_main (int argc, char **argv)
     }
     parseArguments(argc, argv, slot_list, args);
  
++#ifdef SDL_HINT_WINDOWS_DPI_AWARENESS
 +   SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
++#endif
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER | SDL_INIT_NOPARACHUTE) < 0) { // initialize SDL
        fprintf(stderr, "SDL_Init() failed: %s\n", SDL_GetError());
        exit(-1);
-@@ -2929,6 +3102,9 @@ int cap32_main (int argc, char **argv)
+@@ -2929,6 +3104,9 @@ int cap32_main (int argc, char **argv)
          applyKeypress(CPC.InputMapper->CPCscancodeFromCPCkey(CPC_J0_DOWN), keyboard_matrix, false, false);
          applyKeypress(CPC.InputMapper->CPCscancodeFromCPCkey(CPC_J0_UP), keyboard_matrix, false, false);
        }
@@ -664,7 +666,7 @@ index bd57d45..ea2a0a5 100644
        while (SDL_PollEvent(&event)) {
           bool processed = false;
           if (!devtools.empty()) {
-@@ -2944,7 +3120,12 @@ int cap32_main (int argc, char **argv)
+@@ -2944,7 +3122,12 @@ int cap32_main (int argc, char **argv)
           }
           if (processed) continue;
           switch (event.type) {
@@ -677,7 +679,7 @@ index bd57d45..ea2a0a5 100644
                 {
                    CPCScancode scancode = CPC.InputMapper->CPCscancodeFromKeysym(event.key.keysym);
                    LOG_VERBOSE("Keyboard: pressed: " << SDL_GetKeyName(event.key.keysym.sym) << " - keycode: " << keycode_names[event.key.keysym.sym] << " (" << event.key.keysym.sym << ") - scancode: " << scancode_names[event.key.keysym.scancode] << " (" << event.key.keysym.scancode << ") - CPC key: " << CPC.InputMapper->CPCkeyToString(CPC.InputMapper->CPCkeyFromKeysym(event.key.keysym)) << " - CPC scancode: " << scancode);
-@@ -2955,6 +3136,7 @@ int cap32_main (int argc, char **argv)
+@@ -2955,6 +3138,7 @@ int cap32_main (int argc, char **argv)
                 break;
  
              case SDL_KEYUP:
@@ -685,7 +687,7 @@ index bd57d45..ea2a0a5 100644
                 {
                    CPCScancode scancode = CPC.InputMapper->CPCscancodeFromKeysym(event.key.keysym);
                    if (!(scancode & MOD_EMU_KEY)) {
-@@ -2965,6 +3147,7 @@ int cap32_main (int argc, char **argv)
+@@ -2965,6 +3149,7 @@ int cap32_main (int argc, char **argv)
                          case CAP32_GUI:
                            {
                              showGui();
@@ -693,7 +695,7 @@ index bd57d45..ea2a0a5 100644
                              break;
                            }
  
-@@ -3130,6 +3313,7 @@ int cap32_main (int argc, char **argv)
+@@ -3130,6 +3315,7 @@ int cap32_main (int argc, char **argv)
                    if (event.jbutton.button == CPC.joystick_menu_button)
                    {
                      showGui();
