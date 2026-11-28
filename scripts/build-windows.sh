@@ -48,7 +48,7 @@ done
 echo "DLLs im Paket:"; ls "$PKG"/*.dll
 mkdir -p "$PKG/doc" && cp "$HERE"/doc/*.md "$PKG/doc/"
 cat > "$PKG/START-HIER.txt" <<'TXT'
-cap32.exe starten (Doppelklick). Menue: F1, Einstellungen: Menue > Options.
+cap32.exe starten (Doppelklick). F1 = Einstellungen und Befehle (Reiter Commands).
 Alles liegt im Programmordner (cap32.cfg, rom\, m4sd\ = M4-"SD-Karte", PDF-Ausgabe).
 M4-Board: M4ROM.BIN nach rom\ legen, siehe doc\m4.md.
 TXT

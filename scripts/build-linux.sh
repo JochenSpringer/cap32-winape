@@ -39,6 +39,7 @@ cp -r "$WORK/resources" "$WORK/rom" "$WORK/licenses" "$PKG/"
 cp "$WORK/cap32.cfg" "$WORK/cap32.cfg.tmpl" "$WORK/COPYING.txt" "$WORK/README.md" "$PKG/"
 mkdir -p "$PKG/doc" && cp "$HERE"/doc/*.md "$PKG/doc/"
 install -m 755 "$HERE/scripts/cap32.sh" "$PKG/cap32"
+install -m 755 "$HERE/scripts/install-desktop.sh" "$PKG/install-desktop.sh"
 tar -C "$OUT" -czf "$OUT/$NAME.tar.gz" "$NAME"
 ( cd "$OUT" && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256" )
 echo "Fertig: $OUT/$NAME.tar.gz"
